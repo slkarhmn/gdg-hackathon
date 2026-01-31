@@ -66,3 +66,6 @@ powerbi_*.csv
 
 # Extras
 *.zip
+
+.eng
+node_modules/
