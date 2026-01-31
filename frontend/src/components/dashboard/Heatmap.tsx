@@ -1,40 +1,95 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
 import type { HeatmapData } from '../../types';
+import {
+  toHeatmapData,
+  getTotalReviews,
+  fetchHeatmapCounts,
+  heatmapDataFromDailyCounts,
+} from '../../api';
+import { DEFAULT_USER_ID } from '../../api/config';
+import type { BackendSpacedRepetition } from '../../api';
 
 interface HeatmapProps {
   data: HeatmapData;
   currentYear: number;
+  spacedReps?: BackendSpacedRepetition[];
 }
 
-const Heatmap: React.FC<HeatmapProps> = ({ data, currentYear }) => {
-  const [selectedYear, setSelectedYear] = useState(currentYear);
+// Map repetition count to color level 0–4 (dynamic scale so max count = darkest)
+function getHeatLevel(count: number, maxCount: number): number {
+  if (count === 0) return 0;
+  if (maxCount <= 0) return 0;
+  if (maxCount === 1) return count >= 1 ? 4 : 0;
+  // Spread 1..maxCount across levels 1–4
+  const level = Math.min(4, 1 + Math.floor((count - 1) * 4 / (maxCount - 1)));
+  return Math.max(1, level);
+}
 
-  // GitHub-style colors: light (less) to dark (more)
-  const getHeatColor = (value: number) => {
+const Heatmap: React.FC<HeatmapProps> = ({ data, currentYear, spacedReps = [] }) => {
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [heatmapDataByYear, setHeatmapDataByYear] = useState<Record<number, HeatmapData>>({});
+
+  // When year changes, fetch heatmap counts from the dedicated endpoint
+  useEffect(() => {
+    let cancelled = false;
+    fetchHeatmapCounts(DEFAULT_USER_ID, selectedYear)
+      .then((res) => {
+        if (!cancelled) {
+          setHeatmapDataByYear((prev) => ({
+            ...prev,
+            [res.year]: heatmapDataFromDailyCounts(res.daily_counts, res.year),
+          }));
+        }
+      })
+      .catch(() => {
+        // Keep using fallback (toHeatmapData / data / placeholder)
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedYear]);
+
+  // GitHub-style colors: light (less) to dark (more repetitions)
+  const getHeatColor = (level: number) => {
     const colors = ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
-    return colors[value] || colors[0];
+    return colors[level] ?? colors[0];
   };
 
-  // Generate full year data (12 months)
-  const generateFullYearData = () => {
+  // Prefer API heatmap data for selected year; fallback to spacedReps, then props, then placeholder
+  const fullYearData = useMemo(() => {
+    if (heatmapDataByYear[selectedYear]) {
+      return heatmapDataByYear[selectedYear];
+    }
+    if (spacedReps && spacedReps.length > 0) {
+      return toHeatmapData(spacedReps, selectedYear);
+    }
+    if (data && Object.keys(data.data).length > 0) {
+      return data;
+    }
     const allMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const fullYearData: { [key: string]: number[] } = {};
-    
-    days.forEach(day => {
-      // 52 weeks * 12 months ≈ 52 cells for full year view
-      fullYearData[day] = Array(52).fill(0).map(() => Math.floor(Math.random() * 5));
+    const placeholderData: { [key: string]: number[] } = {};
+    days.forEach((day) => {
+      placeholderData[day] = Array(52).fill(0);
     });
-    
-    return { months: allMonths, days, data: fullYearData };
-  };
-
-  const fullYearData = generateFullYearData();
+    return { months: allMonths, days, data: placeholderData };
+  }, [heatmapDataByYear, selectedYear, spacedReps, data]);
   
-  const totalReviews = Object.values(fullYearData.data)
-    .flat()
-    .reduce((sum, val) => sum + val, 0);
+  const totalReviews = useMemo(() => {
+    if (spacedReps && spacedReps.length > 0) {
+      return getTotalReviews(spacedReps);
+    }
+    return Object.values(fullYearData.data)
+      .flat()
+      .reduce((sum, val) => sum + val, 0);
+  }, [spacedReps, fullYearData]);
+
+  // Max count in the grid for dynamic color scale (more repetitions = darker)
+  const maxCount = useMemo(() => {
+    const counts = Object.values(fullYearData.data).flat();
+    return counts.length ? Math.max(...counts) : 0;
+  }, [fullYearData]);
 
   const handlePrevYear = () => {
     setSelectedYear(selectedYear - 1);
@@ -90,14 +145,17 @@ const Heatmap: React.FC<HeatmapProps> = ({ data, currentYear }) => {
             <div className="heatmap-cells">
               {fullYearData.days.map((day) => (
                 <div key={day} className="day-row">
-                  {fullYearData.data[day].map((value, cellIdx) => (
-                    <div
-                      key={cellIdx}
-                      className="heatmap-cell"
-                      style={{ backgroundColor: getHeatColor(value) }}
-                      title={`${day}: ${value} reviews`}
-                    />
-                  ))}
+                  {fullYearData.data[day].map((count, cellIdx) => {
+                    const level = getHeatLevel(count, maxCount);
+                    return (
+                      <div
+                        key={cellIdx}
+                        className="heatmap-cell"
+                        style={{ backgroundColor: getHeatColor(level) }}
+                        title={count > 0 ? `${day}: ${count} repetition${count !== 1 ? 's' : ''}` : 'No repetitions'}
+                      />
+                    );
+                  })}
                 </div>
               ))}
             </div>

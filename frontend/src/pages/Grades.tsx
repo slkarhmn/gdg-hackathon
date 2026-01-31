@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
   Plus,
@@ -17,9 +17,23 @@ import {
   Search,
   BookOpen,
   Target,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
 import './Grades.css';
+import {
+  fetchAssignments,
+  fetchWeightedGrade,
+  fetchNotes,
+  fetchNoteById,
+  createAssignment
+} from '../api';
+import { DEFAULT_USER_ID } from '../api/config';
+import type {
+  BackendAssignment,
+  BackendNote,
+  WeightedGradeResponse
+} from '../api';
 
 interface Assignment {
   id: string;
@@ -55,104 +69,219 @@ interface CourseGrade {
 type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades' | 'todo' | 'help';
 
 interface GradesProps {
-  onNavigate: (page: Page) => void;
+  onNavigate: (page: Page, options?: { openNoteId?: string; preloadedNote?: BackendNote }) => void;
+}
+
+// Helper to extract title from note content
+function extractNoteTitle(note: BackendNote): string {
+  if (note.content?.title) {
+    return note.content.title;
+  }
+  if (note.content?.body) {
+    const bodyStr = typeof note.content.body === 'string' ? note.content.body : '';
+    const headingMatch = bodyStr.match(/^#\s*(.+)/m);
+    if (headingMatch) {
+      return headingMatch[1].trim();
+    }
+  }
+  return note.subject ? `${note.subject} Notes` : `Note ${note.id}`;
+}
+
+// Helper to extract preview from note content
+function extractNotePreview(note: BackendNote): string {
+  if (note.content?.body) {
+    const bodyStr = typeof note.content.body === 'string' ? note.content.body : '';
+    // Remove markdown headers and get first 100 chars
+    const cleanText = bodyStr.replace(/^#+\s*/gm, '').trim();
+    return cleanText.length > 100 ? cleanText.substring(0, 100) + '...' : cleanText;
+  }
+  return 'No preview available';
+}
+
+// Helper to determine assignment status
+function getAssignmentStatus(assignment: BackendAssignment): 'upcoming' | 'completed' | 'overdue' {
+  const now = new Date();
+  const dueDate = new Date(assignment.due_date);
+  
+  if (assignment.grade !== null) {
+    return 'completed';
+  }
+  if (dueDate < now) {
+    return 'overdue';
+  }
+  return 'upcoming';
+}
+
+// Helper to transform backend assignment to frontend format
+function transformAssignment(a: BackendAssignment): Assignment {
+  return {
+    id: a.id.toString(),
+    title: a.name,
+    course: a.tags.length > 0 ? a.tags[0] : 'General',
+    dueDate: a.due_date.split('T')[0],
+    status: getAssignmentStatus(a),
+    grade: a.grade ?? undefined,
+    weight: a.weight,
+    tags: a.tags
+  };
 }
 
 const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('analytics');
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [showAddAssignment, setShowAddAssignment] = useState(false);
+  const [addAssignmentSubmitting, setAddAssignmentSubmitting] = useState(false);
+  const [addAssignmentError, setAddAssignmentError] = useState<string | null>(null);
+  const [addForm, setAddForm] = useState({ title: '', dueDate: '', course: '', weight: '10' });
   const [showGradeCalculator, setShowGradeCalculator] = useState(false);
   const [aiQuestion, setAiQuestion] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'upcoming' | 'completed'>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [assignments, setAssignments] = useState<Assignment[]>([
-    {
-      id: '1',
-      title: 'JavaFX GUI Application',
-      course: 'Software Development',
-      dueDate: '2026-02-10',
-      status: 'upcoming',
-      weight: 20,
-      tags: ['javafx', 'gui', 'programming']
-    },
-    {
-      id: '2',
-      title: 'User Research Report',
-      course: 'Human Computer Interaction',
-      dueDate: '2026-02-05',
-      status: 'upcoming',
-      weight: 15,
-      tags: ['hci', 'research', 'user-testing']
-    },
-    {
-      id: '3',
-      title: 'Database Design Project',
-      course: 'Database Systems',
-      dueDate: '2026-01-28',
-      status: 'completed',
-      grade: 92,
-      weight: 25,
-      tags: ['sql', 'database', 'design']
-    },
-    {
-      id: '4',
-      title: 'Binary Search Tree Implementation',
-      course: 'Data Structures',
-      dueDate: '2026-01-25',
-      status: 'completed',
-      grade: 88,
-      weight: 20,
-      tags: ['algorithms', 'data-structures', 'java']
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [allNotes, setAllNotes] = useState<BackendNote[]>([]);
+  const [weightedGradeData, setWeightedGradeData] = useState<WeightedGradeResponse | null>(null);
+  const [targetGrade, setTargetGrade] = useState(90);
+  const [openingNoteId, setOpeningNoteId] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const [assignmentsData, notesData, weightedGrade] = await Promise.all([
+        fetchAssignments(DEFAULT_USER_ID).catch(() => []),
+        fetchNotes(DEFAULT_USER_ID).catch(() => []),
+        fetchWeightedGrade(DEFAULT_USER_ID).catch(() => null)
+      ]);
+
+      const transformedAssignments = assignmentsData.map(transformAssignment);
+      setAssignments(transformedAssignments);
+      setAllNotes(notesData);
+      setWeightedGradeData(weightedGrade);
+    } catch (err) {
+      console.error('Failed to load grades data:', err);
+      setError('Failed to load data. Please check if the backend is running.');
+    } finally {
+      setLoading(false);
     }
-  ]);
+  }, []);
 
-  const [relatedNotes] = useState<{ [key: string]: Note[] }>({
-    '1': [
-      { id: 'n1', title: 'JavaFX Basics - Lecture 5', tags: ['javafx', 'gui'], preview: 'Introduction to JavaFX scene graph, layouts, and event handling...' },
-      { id: 'n2', title: 'JavaFX Advanced Components', tags: ['javafx', 'programming'], preview: 'TableView, TreeView, and custom controls in JavaFX...' },
-      { id: 'n3', title: 'GUI Design Patterns', tags: ['gui', 'design'], preview: 'MVC, MVP, and MVVM patterns for GUI applications...' }
-    ],
-    '2': [
-      { id: 'n4', title: 'User Research Methods', tags: ['hci', 'research'], preview: 'Qualitative and quantitative research methods...' },
-      { id: 'n5', title: 'Usability Testing Guide', tags: ['hci', 'user-testing'], preview: 'Planning and conducting usability tests...' }
-    ],
-    '3': [
-      { id: 'n6', title: 'SQL Fundamentals', tags: ['sql', 'database'], preview: 'SELECT, JOIN, and aggregate functions...' },
-      { id: 'n7', title: 'Database Normalization', tags: ['database', 'design'], preview: '1NF, 2NF, 3NF, and BCNF explained...' }
-    ],
-    '4': [
-      { id: 'n8', title: 'Binary Trees Overview', tags: ['data-structures'], preview: 'Tree traversal algorithms and properties...' },
-      { id: 'n9', title: 'BST Operations', tags: ['algorithms', 'data-structures'], preview: 'Insert, delete, and search operations...' }
-    ]
-  });
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
-  const [courseGrades] = useState<CourseGrade[]>([
-    {
-      id: '1',
-      courseName: 'Human Computer Interaction',
-      currentGrade: 87,
-      targetGrade: 90,
-      assignments: [
-        { name: 'Assignment 1', grade: 85, weight: 15, completed: true },
-        { name: 'Assignment 2', grade: 90, weight: 15, completed: true },
-        { name: 'Midterm', grade: 88, weight: 30, completed: true },
-        { name: 'Final Project', grade: 0, weight: 40, completed: false }
-      ]
-    },
-    {
-      id: '2',
-      courseName: 'Database Systems',
-      currentGrade: 92,
-      targetGrade: 95,
-      assignments: [
-        { name: 'SQL Assignment', grade: 95, weight: 20, completed: true },
-        { name: 'Design Project', grade: 92, weight: 25, completed: true },
-        { name: 'Final Exam', grade: 0, weight: 55, completed: false }
-      ]
+  const handleAddAssignmentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddAssignmentError(null);
+    const title = addForm.title.trim();
+    const dueDate = addForm.dueDate;
+    const weight = parseFloat(addForm.weight) || 0;
+    if (!title || !dueDate) {
+      setAddAssignmentError('Title and due date are required.');
+      return;
     }
-  ]);
+    setAddAssignmentSubmitting(true);
+    try {
+      const dueIso = new Date(dueDate).toISOString();
+      const tags = addForm.course.trim() ? [addForm.course.trim()] : [];
+      await createAssignment(
+        { name: title, due_date: dueIso, tags, weight },
+        DEFAULT_USER_ID
+      );
+      setAddForm({ title: '', dueDate: '', course: '', weight: '10' });
+      setShowAddAssignment(false);
+      await loadData();
+    } catch (err) {
+      setAddAssignmentError(err instanceof Error ? err.message : 'Failed to create assignment.');
+    } finally {
+      setAddAssignmentSubmitting(false);
+    }
+  };
+
+  // Find related notes based on matching tags
+  const getRelatedNotes = useMemo(() => {
+    return (assignment: Assignment): Note[] => {
+      if (!assignment.tags || assignment.tags.length === 0) {
+        return [];
+      }
+
+      const assignmentTagsLower = new Set(assignment.tags.map(t => t.toLowerCase()));
+      
+      return allNotes
+        .filter(note => {
+          const noteTags = note.tags || [];
+          return noteTags.some(tag => assignmentTagsLower.has(tag.toLowerCase()));
+        })
+        .map(note => ({
+          id: note.id.toString(),
+          title: extractNoteTitle(note),
+          tags: note.tags || [],
+          preview: extractNotePreview(note)
+        }));
+    };
+  }, [allNotes]);
+
+  // Calculate course grades from assignments grouped by first tag (course)
+  const courseGrades = useMemo((): CourseGrade[] => {
+    // Group assignments by course (first tag)
+    const courseMap = new Map<string, BackendAssignment[]>();
+    
+    assignments.forEach(a => {
+      const course = a.course || 'General';
+      if (!courseMap.has(course)) {
+        courseMap.set(course, []);
+      }
+      // Find the original backend assignment data
+      courseMap.get(course)!.push({
+        id: parseInt(a.id),
+        user_id: 1,
+        canvas_id: null,
+        name: a.title,
+        due_date: a.dueDate,
+        tags: a.tags,
+        grade: a.grade ?? null,
+        weight: a.weight,
+        created_at: ''
+      });
+    });
+
+    const courses: CourseGrade[] = [];
+    
+    courseMap.forEach((courseAssignments, courseName) => {
+      // Calculate weighted grade for this course
+      let totalWeight = 0;
+      let weightedSum = 0;
+      
+      const assignmentDetails = courseAssignments.map(a => {
+        const isCompleted = a.grade !== null;
+        if (isCompleted && a.weight > 0) {
+          weightedSum += (a.grade || 0) * a.weight;
+          totalWeight += a.weight;
+        }
+        return {
+          name: a.name,
+          grade: a.grade || 0,
+          weight: a.weight,
+          completed: isCompleted
+        };
+      });
+
+      const currentGrade = totalWeight > 0 ? weightedSum / totalWeight : 0;
+
+      courses.push({
+        id: courseName,
+        courseName,
+        currentGrade: Math.round(currentGrade * 100) / 100,
+        targetGrade,
+        assignments: assignmentDetails
+      });
+    });
+
+    return courses;
+  }, [assignments, targetGrade]);
 
   const handleTabChange = (tab: string) => {
     setMainSidebarTab(tab);
@@ -180,7 +309,8 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
 
   const filteredAssignments = assignments.filter(assignment => {
     const matchesSearch = assignment.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      assignment.course.toLowerCase().includes(searchQuery.toLowerCase());
+      assignment.course.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      assignment.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesFilter = filterStatus === 'all' || assignment.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
@@ -188,11 +318,121 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   const upcomingAssignments = assignments.filter(a => a.status === 'upcoming');
   const completedAssignments = assignments.filter(a => a.status === 'completed');
 
+  // Get related notes for the selected assignment
+  const relatedNotesForSelected = selectedAssignment ? getRelatedNotes(selectedAssignment) : [];
+
+  if (loading) {
+    return (
+      <div className="grades-page-container">
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <div className="grades-content-wrapper">
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+            <p>Loading grades...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grades-page-container">
       <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
 
       <div className="grades-content-wrapper">
+        {error && (
+          <div style={{ 
+            padding: '1rem', 
+            backgroundColor: '#fee2e2', 
+            color: '#991b1b', 
+            borderRadius: '8px', 
+            margin: '1rem',
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 100
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Add Assignment Modal */}
+        {showAddAssignment && (
+          <div className="add-assignment-modal-overlay" onClick={() => !addAssignmentSubmitting && setShowAddAssignment(false)}>
+            <div className="add-assignment-modal" onClick={e => e.stopPropagation()}>
+              <div className="add-assignment-modal-header">
+                <h3>Add Assignment</h3>
+                <button
+                  type="button"
+                  className="add-assignment-modal-close"
+                  onClick={() => !addAssignmentSubmitting && setShowAddAssignment(false)}
+                  aria-label="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <form onSubmit={handleAddAssignmentSubmit} className="add-assignment-form">
+                {addAssignmentError && (
+                  <div className="add-assignment-form-error">{addAssignmentError}</div>
+                )}
+                <label>
+                  Title
+                  <input
+                    type="text"
+                    value={addForm.title}
+                    onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))}
+                    placeholder="e.g. Midterm Essay"
+                    required
+                    autoFocus
+                  />
+                </label>
+                <label>
+                  Due Date
+                  <input
+                    type="date"
+                    value={addForm.dueDate}
+                    onChange={e => setAddForm(f => ({ ...f, dueDate: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  Course / Tag
+                  <input
+                    type="text"
+                    value={addForm.course}
+                    onChange={e => setAddForm(f => ({ ...f, course: e.target.value }))}
+                    placeholder="e.g. HCI"
+                  />
+                </label>
+                <label>
+                  Weight (%)
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={addForm.weight}
+                    onChange={e => setAddForm(f => ({ ...f, weight: e.target.value }))}
+                  />
+                </label>
+                <div className="add-assignment-form-actions">
+                  <button
+                    type="button"
+                    className="add-assignment-btn-cancel"
+                    onClick={() => setShowAddAssignment(false)}
+                    disabled={addAssignmentSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="add-assignment-btn-submit" disabled={addAssignmentSubmitting}>
+                    {addAssignmentSubmitting ? 'Adding…' : 'Add Assignment'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+        
         {/* Assignments Sidebar */}
         <aside className="assignments-sidebar">
           <div className="assignments-sidebar-header">
@@ -296,6 +536,55 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
                 </button>
               </div>
 
+              {/* Overall Weighted Grade from API */}
+              {weightedGradeData && (
+                <div className="overall-grade-card" style={{
+                  background: 'linear-gradient(135deg, #6B9080 0%, #A4C3B2 100%)',
+                  borderRadius: '12px',
+                  padding: '1.5rem',
+                  marginBottom: '1.5rem',
+                  color: 'white'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '1rem', opacity: 0.9 }}>Overall Weighted Grade</h3>
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', opacity: 0.8 }}>
+                        Based on {weightedGradeData.total_weight_used || 0}% of total weight
+                      </p>
+                    </div>
+                    <div style={{ fontSize: '2.5rem', fontWeight: 'bold' }}>
+                      {weightedGradeData.weighted_grade !== null 
+                        ? `${weightedGradeData.weighted_grade}%` 
+                        : 'N/A'}
+                    </div>
+                  </div>
+                  {weightedGradeData.message && (
+                    <p style={{ margin: '0.5rem 0 0', fontSize: '0.875rem', opacity: 0.8 }}>
+                      {weightedGradeData.message}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Target Grade Input */}
+              <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <label style={{ fontWeight: 500 }}>Target Grade:</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={targetGrade}
+                  onChange={(e) => setTargetGrade(parseInt(e.target.value) || 90)}
+                  style={{
+                    padding: '0.5rem',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    width: '80px'
+                  }}
+                />
+                <span>%</span>
+              </div>
+
               <div className="calculator-content">
                 {courseGrades.map(course => {
                   const required = calculateRequiredGrade(course);
@@ -390,22 +679,64 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
                   <div className="section-title">
                     <BookOpen size={18} />
                     <h3>Related Notes</h3>
+                    <span style={{ fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.5rem' }}>
+                      (Notes with matching tags)
+                    </span>
                   </div>
                   <div className="related-notes-list">
-                    {relatedNotes[selectedAssignment.id]?.map(note => (
-                      <div key={note.id} className="related-note-card">
-                        <div className="note-card-header">
-                          <FileText size={16} />
-                          <h4>{note.title}</h4>
+                    {relatedNotesForSelected.length > 0 ? (
+                      relatedNotesForSelected.map(note => (
+                        <div
+                          key={note.id}
+                          className={`related-note-card ${openingNoteId === note.id ? 'opening' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={async () => {
+                            if (openingNoteId) return;
+                            setOpeningNoteId(note.id);
+                            try {
+                              const fetchedNote = await fetchNoteById(parseInt(note.id, 10));
+                              onNavigate('notes', { preloadedNote: fetchedNote });
+                            } catch (err) {
+                              console.error('Failed to load note:', err);
+                              setOpeningNoteId(null);
+                            }
+                          }}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              if (openingNoteId) return;
+                              setOpeningNoteId(note.id);
+                              try {
+                                const fetchedNote = await fetchNoteById(parseInt(note.id, 10));
+                                onNavigate('notes', { preloadedNote: fetchedNote });
+                              } catch (err) {
+                                console.error('Failed to load note:', err);
+                                setOpeningNoteId(null);
+                              }
+                            }
+                          }}
+                        >
+                          <div className="note-card-header">
+                            <FileText size={16} />
+                            <h4>{openingNoteId === note.id ? 'Opening...' : note.title}</h4>
+                          </div>
+                          <p className="note-preview">{openingNoteId === note.id ? '' : note.preview}</p>
+                          <div className="note-tags">
+                            {note.tags.map((tag, idx) => (
+                              <span key={idx} className="note-tag">{tag}</span>
+                            ))}
+                          </div>
                         </div>
-                        <p className="note-preview">{note.preview}</p>
-                        <div className="note-tags">
-                          {note.tags.map((tag, idx) => (
-                            <span key={idx} className="note-tag">{tag}</span>
-                          ))}
-                        </div>
+                      ))
+                    ) : (
+                      <div style={{ padding: '1rem', color: '#6b7280', textAlign: 'center' }}>
+                        <p>No notes found with matching tags.</p>
+                        <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
+                          Create notes with tags: {selectedAssignment.tags.join(', ')}
+                        </p>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
 

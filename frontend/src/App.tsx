@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { useGraphService } from './auth/graphService';
 import Login from './pages/Login';
@@ -9,13 +9,27 @@ import Calendar from './pages/Calendar';
 import ToDo from './pages/ToDo';
 import GetHelp from './pages/GetHelp';
 import ProfessorDashboard from './pages/Professordashboard';
+import type { BackendNote } from './api';
 import './styles/globals.css';
+
+export type NavigateOptions = { openNoteId?: string; preloadedNote?: BackendNote };
+
+export interface OpenTab {
+  id: string;
+  title: string;
+  folderId: string;
+}
 
 // Main App Component (wrapped with auth)
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
   const { isAuthenticated, isLoading, account, getAccessToken } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [notesPreloadedNote, setNotesPreloadedNote] = useState<BackendNote | null>(null);
+  
+  // Persist note tabs across navigation
+  const [notesOpenTabs, setNotesOpenTabs] = useState<OpenTab[]>([]);
+  const [notesActiveTabId, setNotesActiveTabId] = useState<string>('');
   
   // Check if user is professor/admin (you can customize this logic)
   const isProfessor = true; // Set to true for demo, or check account.jobTitle, account.roles, etc.
@@ -29,10 +43,28 @@ function AppContent() {
       }
     };
     fetchToken();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, getAccessToken]);
 
   // Initialize Graph Service
   const graphService = useGraphService(accessToken);
+
+  const handleNavigate = (page: string, options?: NavigateOptions) => {
+    setCurrentPage(page);
+    if (page === 'notes' && options?.preloadedNote != null) {
+      setNotesPreloadedNote(options.preloadedNote);
+    } else {
+      setNotesPreloadedNote(null);
+    }
+  };
+
+  // Callbacks to sync Notes tab state with App
+  const handleNotesTabsChange = useCallback((tabs: OpenTab[]) => {
+    setNotesOpenTabs(tabs);
+  }, []);
+
+  const handleNotesActiveTabChange = useCallback((tabId: string) => {
+    setNotesActiveTabId(tabId);
+  }, []);
 
   // Show loading screen while checking authentication
   if (isLoading) {
@@ -70,30 +102,40 @@ function AppContent() {
   // Render appropriate page
   const renderPage = () => {
     const pageProps = {
-      onNavigate: setCurrentPage,
       graphService,
       userProfile: account,
     };
 
     switch (currentPage) {
       case 'dashboard':
-        return <Dashboard {...pageProps} />;
+        return <Dashboard onNavigate={handleNavigate} {...pageProps} />;
       case 'notes':
-        return <Notes {...pageProps} />;
+        return (
+          <Notes
+            onNavigate={setCurrentPage}
+            initialPreloadedNote={notesPreloadedNote}
+            onClearPreloadedNote={() => setNotesPreloadedNote(null)}
+            persistedOpenTabs={notesOpenTabs}
+            persistedActiveTabId={notesActiveTabId}
+            onTabsChange={handleNotesTabsChange}
+            onActiveTabChange={handleNotesActiveTabChange}
+            {...pageProps}
+          />
+        );
       case 'grades':
       case 'analytics':
-        return <Grades {...pageProps} />;
+        return <Grades onNavigate={handleNavigate} {...pageProps} />;
       case 'calendar':
-        return <Calendar {...pageProps} />;
+        return <Calendar onNavigate={handleNavigate} {...pageProps} />;
       case 'files':
       case 'todo':
-        return <ToDo {...pageProps} />;
+        return <ToDo onNavigate={handleNavigate} {...pageProps} />;
       case 'help':
-        return <GetHelp {...pageProps} />;
+        return <GetHelp onNavigate={handleNavigate} {...pageProps} />;
       case 'professor':
-        return <ProfessorDashboard {...pageProps} />;
+        return <ProfessorDashboard onNavigate={handleNavigate} {...pageProps} />;
       default:
-        return <Dashboard {...pageProps} />;
+        return <Dashboard onNavigate={handleNavigate} {...pageProps} />;
     }
   };
 

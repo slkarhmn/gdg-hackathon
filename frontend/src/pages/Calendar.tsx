@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import Header from '../components/layout/Header';
 import { 
@@ -7,9 +7,11 @@ import {
   Calendar as CalendarIcon,
   Clock,
   AlertCircle,
-  Plus,
-  Filter
+  Plus
 } from 'lucide-react';
+import { fetchAssignments, type BackendAssignment } from '../api/assignments';
+import { fetchStudyPlan, type StudyPlanResponse } from '../api/studyPlans';
+import { DEFAULT_USER_ID } from '../api/config';
 import './Calendar.css';
 
 interface CalendarEvent {
@@ -29,90 +31,117 @@ interface CalendarProps {
   onNavigate: (page: Page) => void;
 }
 
+function assignmentPriority(dueDate: string): 'high' | 'medium' | 'low' {
+  const due = new Date(dueDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays <= 7) return 'high';
+  if (diffDays <= 14) return 'medium';
+  return 'low';
+}
+
+function formatTimeFromIso(iso: string): string {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  if (h === 23 && m === 59) return '11:59 PM';
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${period}`;
+}
+
+/** MM/DD/YYYY -> YYYY-MM-DD */
+function studyPlanDateToIso(dateStr: string): string {
+  const [mm, dd, yyyy] = dateStr.split('/');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/** "09:00" -> "9:00 AM" */
+function studyPlanTimeToDisplay(slot: string): string {
+  const [hStr, mStr] = slot.split(':');
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr || '0', 10);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${period}`;
+}
+
+function assignmentsToCalendarEvents(assignments: BackendAssignment[]): CalendarEvent[] {
+  return assignments.map((a) => {
+    const due = new Date(a.due_date);
+    const dateStr = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+    const subject = Array.isArray(a.tags) && a.tags.length > 0 ? a.tags[0] : 'Assignment';
+    return {
+      id: `assignment-${a.id}`,
+      title: a.name,
+      subject,
+      date: dateStr,
+      time: formatTimeFromIso(a.due_date),
+      type: 'assignment',
+      priority: assignmentPriority(a.due_date),
+    };
+  });
+}
+
+function studyPlanToCalendarEvents(plan: StudyPlanResponse | null): CalendarEvent[] {
+  if (!plan?.study_plan || typeof plan.study_plan !== 'object') return [];
+  const events: CalendarEvent[] = [];
+  for (const [dateStr, slots] of Object.entries(plan.study_plan)) {
+    if (!slots || typeof slots !== 'object') continue;
+    const isoDate = studyPlanDateToIso(dateStr);
+    for (const [timeSlot, session] of Object.entries(slots)) {
+      const subject = session?.subject?.[0] ?? 'Study Session';
+      events.push({
+        id: `study-${isoDate}-${timeSlot}`,
+        title: `Study: ${subject}`,
+        subject,
+        date: isoDate,
+        time: studyPlanTimeToDisplay(timeSlot),
+        type: 'class',
+        priority: 'medium',
+      });
+    }
+  }
+  return events;
+}
+
 const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
   const [activeTab, setActiveTab] = useState('calendar');
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 0, 31)); // January 31, 2026
+  const today = new Date();
+  const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     onNavigate(tab as Page);
   };
 
-  const events: CalendarEvent[] = [
-    {
-      id: '1',
-      title: 'JavaFX GUI Development Test',
-      subject: 'Object-Oriented Programming',
-      date: '2026-02-05',
-      time: '10:00 AM',
-      type: 'exam',
-      priority: 'high',
-    },
-    {
-      id: '2',
-      title: 'UX Research Project Due',
-      subject: 'Human Computer Interaction',
-      date: '2026-02-05',
-      time: '11:59 PM',
-      type: 'assignment',
-      priority: 'high',
-    },
-    {
-      id: '3',
-      title: 'Algorithm Analysis Quiz',
-      subject: 'Data Structures',
-      date: '2026-02-01',
-      time: '2:00 PM',
-      type: 'exam',
-      priority: 'medium',
-    },
-    {
-      id: '4',
-      title: 'Database Design Presentation',
-      subject: 'Database Systems',
-      date: '2026-02-08',
-      time: '3:30 PM',
-      type: 'assignment',
-      priority: 'high',
-    },
-    {
-      id: '5',
-      title: 'Web Development Workshop',
-      subject: 'Web Development',
-      date: '2026-02-12',
-      time: '1:00 PM',
-      type: 'event',
-      priority: 'low',
-    },
-    {
-      id: '6',
-      title: 'OS Lab Report',
-      subject: 'Operating Systems',
-      date: '2026-02-15',
-      time: '11:59 PM',
-      type: 'assignment',
-      priority: 'medium',
-    },
-    {
-      id: '7',
-      title: 'HCI Midterm Exam',
-      subject: 'Human Computer Interaction',
-      date: '2026-02-20',
-      time: '9:00 AM',
-      type: 'exam',
-      priority: 'high',
-    },
-    {
-      id: '8',
-      title: 'Data Structures Project Demo',
-      subject: 'Data Structures',
-      date: '2026-02-18',
-      time: '4:00 PM',
-      type: 'assignment',
-      priority: 'high',
-    },
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      fetchAssignments(DEFAULT_USER_ID),
+      fetchStudyPlan(DEFAULT_USER_ID),
+    ])
+      .then(([assignments, studyPlan]) => {
+        if (cancelled) return;
+        const assignmentEvents = assignmentsToCalendarEvents(assignments);
+        const studyEvents = studyPlanToCalendarEvents(studyPlan ?? null);
+        setEvents([...assignmentEvents, ...studyEvents]);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load calendar data');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const getDaysInMonth = (date: Date) => {
     return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
@@ -149,7 +178,7 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
       const dayEvents = getEventsForDate(date);
-      const isToday = date.toDateString() === new Date(2026, 0, 31).toDateString();
+      const isToday = date.toDateString() === today.toDateString();
       const isSelected = selectedDate?.toDateString() === date.toDateString();
 
       days.push(
@@ -160,16 +189,17 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
         >
           <span className="day-number">{day}</span>
           {dayEvents.length > 0 && (
-            <div className="event-indicators">
-              {dayEvents.slice(0, 3).map((event, idx) => (
-                <div
-                  key={idx}
-                  className={`event-indicator ${event.type} ${event.priority}`}
-                  title={event.title}
-                />
+            <div className="day-events">
+              {dayEvents.slice(0, 3).map((event) => (
+                <div key={event.id} className="day-event-row">
+                  <div className={`event-indicator ${event.type} ${event.priority}`} title={event.title} />
+                  <span className="event-label" title={event.title}>
+                    {event.title.length > 12 ? `${event.title.slice(0, 12)}…` : event.title}
+                  </span>
+                </div>
               ))}
               {dayEvents.length > 3 && (
-                <span className="more-events">+{dayEvents.length - 3}</span>
+                <span className="more-events">+{dayEvents.length - 3} more</span>
               )}
             </div>
           )}
@@ -193,7 +223,13 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
   };
 
   const upcomingEvents = events
-    .filter(event => new Date(event.date) >= new Date(2026, 0, 31))
+    .filter(event => {
+      const eventDate = new Date(event.date);
+      eventDate.setHours(0, 0, 0, 0);
+      const todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      return eventDate >= todayStart;
+    })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .slice(0, 5);
 
@@ -211,8 +247,10 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
 
   const getDaysUntil = (dateStr: string) => {
     const target = new Date(dateStr);
-    const today = new Date(2026, 0, 31);
-    const diff = Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    target.setHours(0, 0, 0, 0);
+    const todayStart = new Date(today);
+    todayStart.setHours(0, 0, 0, 0);
+    const diff = Math.ceil((target.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
     return diff;
   };
 
@@ -223,9 +261,19 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
       <main className="calendar-main">
         <Header userName="Saachi" />
 
+        {error && (
+          <div className="calendar-error" role="alert">
+            {error}
+          </div>
+        )}
         <div className="calendar-content">
           {/* Calendar Grid */}
           <div className="calendar-section">
+            {loading && (
+              <div className="calendar-loading">
+                <p>Loading assignments and study plan…</p>
+              </div>
+            )}
             <div className="calendar-header">
               <div className="calendar-title-section">
                 <h2 className="calendar-title">
@@ -237,7 +285,7 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
                 <button className="calendar-btn" onClick={() => changeMonth('prev')}>
                   <ChevronLeft size={20} />
                 </button>
-                <button className="calendar-btn today-btn" onClick={() => setCurrentDate(new Date(2026, 0, 31))}>
+                <button className="calendar-btn today-btn" onClick={() => setCurrentDate(new Date(today.getFullYear(), today.getMonth(), today.getDate()))}>
                   Today
                 </button>
                 <button className="calendar-btn" onClick={() => changeMonth('next')}>
@@ -266,11 +314,24 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
             </div>
           </div>
 
-          {/* Sidebar - Upcoming Events / Selected Date Events */}
+          {/* Sidebar - Selected day details or Upcoming Events */}
           <div className="events-sidebar">
             <div className="events-header">
-              <h3>{selectedDate ? 'Events on ' + selectedDate.toLocaleDateString('default', { month: 'short', day: 'numeric' }) : 'Upcoming Events'}</h3>
-              <button className="add-event-btn">
+              <div className="events-header-text">
+                <h3>
+                  {selectedDate
+                    ? selectedDate.toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+                    : 'Upcoming Events'}
+                </h3>
+                {selectedDate && (
+                  <p className="events-subtitle">
+                    {selectedDateEvents.length === 0
+                      ? 'No events this day'
+                      : `${selectedDateEvents.length} event${selectedDateEvents.length === 1 ? '' : 's'}`}
+                  </p>
+                )}
+              </div>
+              <button className="add-event-btn" type="button" aria-label="Add event">
                 <Plus size={18} />
               </button>
             </div>
@@ -279,7 +340,11 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
               {(selectedDate ? selectedDateEvents : upcomingEvents).length === 0 ? (
                 <div className="empty-events">
                   <CalendarIcon size={48} />
-                  <p>No events {selectedDate ? 'on this date' : 'upcoming'}</p>
+                  <p>
+                    {selectedDate
+                      ? 'No events on this date. Select another day or view upcoming events by clearing the selection.'
+                      : 'No events upcoming'}
+                  </p>
                 </div>
               ) : (
                 (selectedDate ? selectedDateEvents : upcomingEvents).map(event => {
@@ -295,7 +360,7 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
                         <span className={`event-type-badge ${event.type}`}>
                           {getEventTypeLabel(event.type)}
                         </span>
-                        {isUrgent && <AlertCircle size={16} className="urgent-icon" />}
+                        {isUrgent && !selectedDate && <AlertCircle size={16} className="urgent-icon" />}
                       </div>
                       
                       <h4 className="event-title">{event.title}</h4>

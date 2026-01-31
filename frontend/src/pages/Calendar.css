@@ -12,6 +12,25 @@
   overflow-y: auto;
 }
 
+.calendar-error {
+  margin-top: 16px;
+  padding: 12px 20px;
+  background-color: rgba(199, 60, 60, 0.1);
+  border: 1px solid rgba(199, 60, 60, 0.3);
+  border-radius: 12px;
+  color: #8b2635;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.calendar-loading {
+  margin-bottom: 16px;
+  padding: 12px 0;
+  font-size: 14px;
+  color: #1F3236;
+  font-weight: 500;
+}
+
 .calendar-content {
   display: grid;
   grid-template-columns: 1fr 400px;
@@ -150,17 +169,68 @@
   margin-bottom: 4px;
 }
 
-.event-indicators {
+.day-events {
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin-top: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.day-event-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background-color: rgba(94, 135, 121, 0.12);
+  border-left: 3px solid #5E8779;
+}
+.day-event-row:has(.event-indicator.exam) {
+  border-left-color: #1F3236;
+  background-color: rgba(31, 50, 54, 0.08);
+}
+.day-event-row:has(.event-indicator.event),
+.day-event-row:has(.event-indicator.class) {
+  border-left-color: #1F3236;
+  background-color: rgba(231, 234, 215, 0.8);
+}
+.day-event-row:has(.event-indicator.assignment) {
+  border-left-color: #5E8779;
 }
 
 .event-indicator {
-  height: 4px;
+  flex-shrink: 0;
+  height: 6px;
+  width: 6px;
   border-radius: 2px;
-  width: 100%;
+}
+
+.day-event-row .event-indicator.high {
+  height: 6px;
+  width: 6px;
+}
+
+.event-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #070103;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.calendar-day.today .day-event-row {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-left-color: rgba(255, 255, 255, 0.9);
+}
+
+.calendar-day.today .event-label {
+  color: rgba(255, 255, 255, 0.98);
 }
 
 .event-indicator.exam {
@@ -171,7 +241,8 @@
   background-color: #5E8779;
 }
 
-.event-indicator.event {
+.event-indicator.event,
+.event-indicator.class {
   background-color: #E7EAD7;
   border: 1px solid #1F3236;
 }
@@ -181,11 +252,15 @@
 }
 
 .more-events {
-  font-size: 9px;
+  font-size: 10px;
   color: #1F3236;
-  text-align: center;
+  text-align: left;
   margin-top: 2px;
   font-weight: 600;
+}
+
+.calendar-day.today .more-events {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 /* Calendar Legend */
@@ -239,14 +314,29 @@
 .events-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 20px;
+  gap: 12px;
+}
+
+.events-header-text {
+  min-width: 0;
+  flex: 1;
 }
 
 .events-header h3 {
   font-size: 18px;
   font-weight: 700;
   color: #070103;
+  margin: 0 0 2px 0;
+}
+
+.events-subtitle {
+  font-size: 13px;
+  color: #1F3236;
+  font-weight: 500;
+  opacity: 0.85;
+  margin: 0;
 }
 
 .add-event-btn {

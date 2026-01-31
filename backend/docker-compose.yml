@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  study-app:
+    build: .
+    container_name: study-app-api
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./study_app.db:/app/study_app.db
+    environment:
+      - FLASK_ENV=production
+      - SQLALCHEMY_DATABASE_URI=sqlite:///app/study_app.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

@@ -1,26 +1,36 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
   ChevronRight,
   ChevronDown,
+  ChevronLeft,
   FileText,
   Folder,
   FolderPlus,
   FilePlus,
   Search,
-  Settings,
   X,
   Sparkles,
   Send,
   PanelLeftClose,
-  PanelLeft
+  PanelLeft,
+  Tag,
+  Repeat,
+  Timer,
+  Play,
+  Pause,
+  RotateCcw
 } from 'lucide-react';
 import './Notes.css';
+import { fetchNotes, createNote, updateNote, fetchTagNames, fetchSpacedRepetitions, recordNoteReview, removeNoteFromSpacedRepetition } from '../api';
+import type { BackendNote } from '../api';
+import { DEFAULT_USER_ID } from '../api/config';
 
 interface Note {
   id: string;
   title: string;
   content?: string;
+  tags?: string[];
 }
 
 interface LectureFolder {
@@ -41,195 +51,167 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface NotesProps {
   onNavigate: (page: Page) => void;
+  initialPreloadedNote?: BackendNote | null;
+  onClearPreloadedNote?: () => void;
+  // Persisted tab state from App
+  persistedOpenTabs?: OpenTab[];
+  persistedActiveTabId?: string;
+  onTabsChange?: (tabs: OpenTab[]) => void;
+  onActiveTabChange?: (tabId: string) => void;
 }
 
-const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
+// Helper to extract title from note content
+function extractNoteTitle(note: BackendNote): string {
+  if (note.content?.title) {
+    return note.content.title;
+  }
+  const bodyStr = typeof note.content?.body === 'string' ? note.content.body : '';
+  if (bodyStr) {
+    const headingMatch = bodyStr.match(/^#\s*(.+)/m);
+    if (headingMatch) return headingMatch[1].trim();
+  }
+  const textStr: string = typeof (note.content as Record<string, unknown>)?.text === 'string' ? ((note.content as Record<string, unknown>).text as string) : '';
+  if (textStr) {
+    const headingMatch = textStr.match(/^#\s*(.+)/m);
+    if (headingMatch) return headingMatch[1].trim();
+  }
+  return note.subject ? `${note.subject} Notes` : `Note ${note.id}`;
+}
+
+// Helper to extract body content from note (supports body, text, or other string fields from backend)
+function extractNoteContent(note: BackendNote): string {
+  if (note.content?.body) {
+    return typeof note.content.body === 'string' ? note.content.body : JSON.stringify(note.content.body);
+  }
+  const c = note.content as Record<string, unknown> | undefined;
+  if (c?.text && typeof c.text === 'string') return c.text;
+  if (c && typeof c === 'object') {
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(c)) {
+      if (key === 'title' && typeof value === 'string') parts.push(`# ${value}`);
+      else if (typeof value === 'string' && (key === 'summary' || key === 'example' || key === 'text')) parts.push(value);
+    }
+    if (parts.length) return parts.join('\n\n');
+  }
+  return '';
+}
+
+// Transform backend notes to folder structure grouped by subject
+function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
+  const folderMap = new Map<string, Note[]>();
+  
+  notes.forEach(note => {
+    const subject = note.subject || 'Uncategorized';
+    if (!folderMap.has(subject)) {
+      folderMap.set(subject, []);
+    }
+    folderMap.get(subject)!.push({
+      id: note.id.toString(),
+      title: extractNoteTitle(note),
+      content: extractNoteContent(note),
+      tags: note.tags || []
+    });
+  });
+
+  const folders: LectureFolder[] = [];
+  let index = 1;
+  
+  folderMap.forEach((folderNotes, folderName) => {
+    folders.push({
+      id: index.toString(),
+      name: folderName,
+      notes: folderNotes,
+      isExpanded: index === 1 // Expand first folder by default
+    });
+    index++;
+  });
+
+  return folders;
+}
+
+const Notes: React.FC<NotesProps> = ({ 
+  onNavigate, 
+  initialPreloadedNote, 
+  onClearPreloadedNote,
+  persistedOpenTabs,
+  persistedActiveTabId,
+  onTabsChange,
+  onActiveTabChange
+}) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('notes');
-  const [folders, setFolders] = useState<LectureFolder[]>([
-    {
-      id: '1',
-      name: 'Human Computer Interaction',
-      notes: [
-        {
-          id: '1-1',
-          title: 'Lecture 1 - Introduction to HCI',
-          content: `# Introduction to HCI
+  const [folders, setFolders] = useState<LectureFolder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [, setAllNotesData] = useState<BackendNote[]>([]);
+  const initialPreloadedNoteIdRef = useRef<string | null>(null);
+  const handledPreloadedNoteIdRef = useRef<number | null>(null);
+  initialPreloadedNoteIdRef.current = initialPreloadedNote?.id != null ? String(initialPreloadedNote.id) : null;
 
-## What is HCI?
-Human-Computer Interaction (HCI) is a multidisciplinary field of study focusing on the design of computer technology and the interaction between humans and computers.
+  // Fetch notes from API
+  useEffect(() => {
+    const loadNotes = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-## Key Components
-- **The User**: Understanding user needs, capabilities, and limitations
-- **The Task**: What the user wants to accomplish
-- **The Context**: Where and when the interaction takes place
-- **The Technology**: The tools and systems being used
-
-## History
-HCI emerged in the 1980s as personal computers became more widespread. It draws from computer science, psychology, design, and ergonomics.`
-        },
-        {
-          id: '1-2',
-          title: 'Lecture 2 - User Research Methods',
-          content: `# User Research Methods
-
-## Qualitative Methods
-- **Interviews**: One-on-one conversations to understand user needs
-- **Observations**: Watching users in their natural environment
-- **Focus Groups**: Group discussions to gather diverse perspectives
-
-## Quantitative Methods
-- **Surveys**: Collecting data from large user populations
-- **Analytics**: Measuring user behavior through data
-- **A/B Testing**: Comparing different design variations
-
-## Best Practices
-Always combine qualitative and quantitative methods for comprehensive insights.`
-        },
-        {
-          id: '1-3',
-          title: 'Lecture 3 - Design Principles',
-          content: `# Design Principles
-
-## Norman's Principles
-1. **Visibility**: Make functions easily discoverable
-2. **Feedback**: Provide immediate response to user actions
-3. **Constraints**: Limit interaction possibilities to prevent errors
-4. **Consistency**: Similar elements should behave similarly
-5. **Affordance**: Design should suggest how to use it
-
-## Gestalt Principles
-- Proximity
-- Similarity
-- Continuity
-- Closure`
-        },
-        {
-          id: '1-4',
-          title: 'Lecture 4 - Prototyping Techniques',
-          content: `# Prototyping
-
-## Low-Fidelity Prototypes
-- Paper sketches
-- Wireframes
-- Storyboards
-
-## High-Fidelity Prototypes
-- Interactive mockups (Figma, Adobe XD)
-- Coded prototypes
-- Functional demos
-
-## When to Use Each
-Low-fidelity for early exploration, high-fidelity for usability testing.`
-        },
-        {
-          id: '1-5',
-          title: 'Lecture 5 - Usability Testing',
-          content: `# Usability Testing
-
-## Key Metrics
-- **Success Rate**: Can users complete the task?
-- **Time on Task**: How long does it take?
-- **Error Rate**: How many mistakes do they make?
-- **Satisfaction**: How do users feel about the experience?
-
-## Testing Methods
-- Moderated testing
-- Unmoderated remote testing
-- Guerrilla testing`
-        },
-        {
-          id: '1-6',
-          title: 'Lecture 6 - Accessibility (a11y)',
-          content: `# Accessibility
-
-## WCAG Guidelines
-1. **Perceivable**: Information must be presentable to users
-2. **Operable**: UI components must be operable
-3. **Understandable**: Information must be understandable
-4. **Robust**: Content must work with assistive technologies
-
-## Common Practices
-- Provide alt text for images
-- Ensure keyboard navigation
-- Use sufficient color contrast
-- Provide captions for videos`
-        },
-      ],
-      isExpanded: true,
-    },
-    {
-      id: '2',
-      name: 'Data Structures & Algorithms',
-      notes: [
-        { id: '2-1', title: 'Arrays and Lists', content: '# Arrays\nContiguous memory, O(1) access\n\n# Linked Lists\nO(n) access, O(1) insertion at known position' },
-        { id: '2-2', title: 'Trees and Graphs', content: '# Trees\nHierarchical structure with root, branches, leaves\n\n# Graphs\nNodes and edges, directed vs undirected' },
-        { id: '2-3', title: 'Hash Tables', content: '# Hash Tables\nKey-value pairs using hash functions\n\n## Collision Resolution\n- Chaining\n- Open addressing' },
-        { id: '2-4', title: 'Stacks and Queues', content: '# Stack (LIFO)\nPush, Pop operations\n\n# Queue (FIFO)\nEnqueue, Dequeue operations' },
-      ],
-      isExpanded: false,
-      subfolders: [
-        {
-          id: '2-sub-1',
-          name: 'Advanced Topics',
-          notes: [
-            { id: '2-sub-1-1', title: 'AVL Trees', content: 'Self-balancing BST with height difference ≤ 1' },
-            { id: '2-sub-1-2', title: 'Red-Black Trees', content: 'Self-balancing BST using color properties' },
-            { id: '2-sub-1-3', title: 'B-Trees', content: 'Multi-way search trees for databases' },
-          ],
-          isExpanded: false,
+        const notesData = await fetchNotes();
+        setAllNotesData(notesData);
+        
+        // Group notes into folders by subject
+        const groupedFolders = groupNotesIntoFolders(notesData);
+        
+        // If no notes from API, use placeholder folders (but don't auto-open any note)
+        if (groupedFolders.length === 0) {
+          const placeholderFolders: LectureFolder[] = [
+            {
+              id: '1',
+              name: 'Getting Started',
+              notes: [
+                {
+                  id: 'placeholder-1',
+                  title: 'Welcome to Notes',
+                  content: '# Welcome!\n\nStart creating notes to see them here. Notes will be grouped by subject.',
+                  tags: []
+                }
+              ],
+              isExpanded: true
+            }
+          ];
+          setFolders(placeholderFolders);
+          
+          // Don't auto-open any note - start with empty state
+          // Only open a note when a preloaded note is passed (e.g. from Grades or Dashboard)
+        } else {
+          setFolders(groupedFolders);
+          
+          // Don't auto-open the first note - only open when explicitly clicked
+          // or when a preloaded note is passed from another page
         }
-      ]
-    },
-    {
-      id: '3',
-      name: 'Database Systems',
-      notes: [
-        { id: '3-1', title: 'SQL Basics', content: '# SQL Fundamentals\n\nSELECT * FROM users WHERE id = 1;\n\nBasic CRUD operations' },
-        { id: '3-2', title: 'Normalization', content: '# Database Normalization\n\n1NF, 2NF, 3NF, BCNF\nReducing redundancy and dependency' },
-        { id: '3-3', title: 'Transactions & ACID', content: '# ACID Properties\n- Atomicity\n- Consistency\n- Isolation\n- Durability' },
-        { id: '3-4', title: 'Indexing Strategies', content: '# Database Indexes\n\nB-Tree indexes, Hash indexes\nSpeed up data retrieval' },
-        { id: '3-5', title: 'Query Optimization', content: '# Optimization Techniques\n\nExplain plans, join strategies (Nested Loop, Hash Join, Merge Join)' },
-      ],
-      isExpanded: false,
-    },
-    {
-      id: '4',
-      name: 'Operating Systems',
-      notes: [
-        { id: '4-1', title: 'Process Management', content: '# Process States\nNew → Ready → Running → Waiting → Terminated\n\n# Scheduling\nFCFS, SJF, Round Robin' },
-        { id: '4-2', title: 'Memory Management', content: '# Memory Concepts\nPaging, Segmentation, Virtual Memory' },
-        { id: '4-3', title: 'File Systems', content: '# File System Types\nFAT, NTFS, ext4\n\ninodes, directory structures' },
-        { id: '4-4', title: 'Synchronization', content: '# Concurrency Control\nMutex, Semaphores, Monitors\n\nDeadlock prevention' },
-      ],
-      isExpanded: false,
-    },
-    {
-      id: '5',
-      name: 'Web Development',
-      notes: [
-        { id: '5-1', title: 'HTML & CSS Fundamentals', content: '# HTML\nSemantic structure, accessibility\n\n# CSS\nBox model, Flexbox, Grid' },
-        { id: '5-2', title: 'JavaScript Essentials', content: '# JavaScript\nVariables, Functions, ES6+ features\n\nAsync/Await, Promises' },
-        { id: '5-3', title: 'React Framework', content: '# React Concepts\nComponents, Props, State, Hooks\n\nVirtual DOM' },
-        { id: '5-4', title: 'REST APIs', content: '# RESTful APIs\nGET, POST, PUT, DELETE\n\nStatus codes: 200, 404, 500' },
-      ],
-      isExpanded: false,
-    },
-    {
-      id: '6',
-      name: 'Machine Learning',
-      notes: [
-        { id: '6-1', title: 'Supervised Learning', content: '# Supervised Learning\nRegression, Classification\n\nLabeled training data' },
-        { id: '6-2', title: 'Unsupervised Learning', content: '# Unsupervised Learning\nClustering, PCA\n\nUnlabeled data patterns' },
-        { id: '6-3', title: 'Neural Networks', content: '# Neural Networks\nNeurons, Layers, Activation Functions\n\nBackpropagation' },
-      ],
-      isExpanded: false,
-    },
-  ]);
+      } catch (err) {
+        console.error('Failed to load notes:', err);
+        setError('Failed to load notes. Please check if the backend is running.');
+        // Set fallback empty state
+        setFolders([]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: '1-3', title: 'Lecture 3 - Design Principles', folderId: '1' }
-  ]);
-  const [activeTabId, setActiveTabId] = useState<string>('1-3');
+    loadNotes();
+  }, []);
+
+  // Initialize tabs from persisted state (preserved across navigation)
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>(persistedOpenTabs ?? []);
+  const [activeTabId, setActiveTabId] = useState<string>(persistedActiveTabId ?? '');
+
+  // Sync tab changes back to parent (App.tsx) for persistence
+  useEffect(() => {
+    onTabsChange?.(openTabs);
+  }, [openTabs, onTabsChange]);
+
+  useEffect(() => {
+    onActiveTabChange?.(activeTabId);
+  }, [activeTabId, onActiveTabChange]);
   const [searchQuery, setSearchQuery] = useState('');
   const [notesSidebarCollapsed, setNotesSidebarCollapsed] = useState(false);
   const [showAIChat, setShowAIChat] = useState(false);
@@ -237,8 +219,74 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
   const [aiInput, setAIInput] = useState('');
   const [selectedText, setSelectedText] = useState('');
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
+  const [spacedRepNoteIds, setSpacedRepNoteIds] = useState<Set<number>>(new Set());
+  const [spacedRepToggling, setSpacedRepToggling] = useState(false);
+  const [editorTitle, setEditorTitle] = useState('');
+  const [editorBody, setEditorBody] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [availableTagNames, setAvailableTagNames] = useState<string[]>([]);
+  const [tagSaving, setTagSaving] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorTitleRef = useRef('');
+  const editorBodyRef = useRef('');
 
   const editorRef = useRef<HTMLDivElement>(null);
+
+  // Pomodoro timer state
+  const [pomodoroCollapsed, setPomodoroCollapsed] = useState(false);
+  const [workMinutes, setWorkMinutes] = useState(25);
+  const [shortBreakMinutes, setShortBreakMinutes] = useState(5);
+  const [longBreakMinutes, setLongBreakMinutes] = useState(15);
+  const [pomodorosBeforeLongBreak, setPomodorosBeforeLongBreak] = useState(4);
+  type PomodoroPhase = 'work' | 'shortBreak' | 'longBreak';
+  const [pomodoroPhase, setPomodoroPhase] = useState<PomodoroPhase>('work');
+  const [pomodoroSecondsRemaining, setPomodoroSecondsRemaining] = useState(25 * 60);
+  const [pomodoroRunning, setPomodoroRunning] = useState(false);
+  const [pomodoroCount, setPomodoroCount] = useState(0); // completed work sessions
+  const pomodoroIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pomodoroInitialSecondsRef = useRef(25 * 60);
+
+  const loadSpacedRepetitions = () => {
+    fetchSpacedRepetitions(DEFAULT_USER_ID)
+      .then((reps) => setSpacedRepNoteIds(new Set(reps.map((r) => r.note_id))))
+      .catch(() => setSpacedRepNoteIds(new Set()));
+  };
+
+  useEffect(() => {
+    loadSpacedRepetitions();
+  }, []);
+
+  useEffect(() => {
+    fetchTagNames(DEFAULT_USER_ID)
+      .then(setAvailableTagNames)
+      .catch(() => setAvailableTagNames([]));
+  }, []);
+
+  useEffect(() => {
+    if (!activeTabId || activeTabId.startsWith('placeholder')) return;
+    const noteId = parseInt(activeTabId, 10);
+    if (Number.isNaN(noteId) || !spacedRepNoteIds.has(noteId)) return;
+    recordNoteReview(noteId, DEFAULT_USER_ID).catch(() => {});
+  }, [activeTabId, spacedRepNoteIds]);
+
+  const handleSpacedRepToggle = async (enabled: boolean) => {
+    if (!activeNote || activeTabId.startsWith('placeholder')) return;
+    const noteId = parseInt(activeNote.id, 10);
+    if (Number.isNaN(noteId)) return;
+    setSpacedRepToggling(true);
+    try {
+      if (enabled) {
+        await recordNoteReview(noteId, DEFAULT_USER_ID);
+      } else {
+        await removeNoteFromSpacedRepetition(noteId, DEFAULT_USER_ID);
+      }
+      loadSpacedRepetitions();
+    } catch (err) {
+      console.error('Spaced repetition toggle failed:', err);
+    } finally {
+      setSpacedRepToggling(false);
+    }
+  };
 
   const handleTabChange = (tab: string) => {
     setMainSidebarTab(tab);
@@ -283,6 +331,164 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
       setActiveTabId(newTabs[newTabs.length - 1].id);
     }
   };
+
+  // Open the preloaded note when navigating from Grades (API-fetched note)
+  useEffect(() => {
+    if (!initialPreloadedNote || loading) return;
+    if (handledPreloadedNoteIdRef.current === initialPreloadedNote.id) return;
+    handledPreloadedNoteIdRef.current = initialPreloadedNote.id;
+
+    const noteIdStr = initialPreloadedNote.id.toString();
+    const noteForEditor: Note = {
+      id: noteIdStr,
+      title: extractNoteTitle(initialPreloadedNote),
+      content: extractNoteContent(initialPreloadedNote),
+      tags: initialPreloadedNote.tags || [],
+    };
+    const subject = initialPreloadedNote.subject || 'Uncategorized';
+
+    if (folders.length === 0) {
+      // No folders yet: create a single folder with just this note and open it
+      const folderId = '1';
+      setFolders([
+        {
+          id: folderId,
+          name: subject,
+          notes: [noteForEditor],
+          isExpanded: true,
+        },
+      ]);
+      // Preserve existing tabs and add the new note as a tab
+      setOpenTabs((prev) => {
+        const existing = prev.find((tab) => tab.id === noteIdStr);
+        if (existing) return prev.map((t) => (t.id === noteIdStr ? { ...t, title: noteForEditor.title } : t));
+        return [...prev, { id: noteIdStr, title: noteForEditor.title, folderId }];
+      });
+      setActiveTabId(noteIdStr);
+      onClearPreloadedNote?.();
+      return;
+    }
+
+    // Merge preloaded note into folders (replace by id or add to subject folder)
+    let folderId: string | null = null;
+    const nextFolders = folders.map((folder) => {
+      const existingIndex = folder.notes.findIndex((n) => n.id === noteIdStr);
+      if (existingIndex >= 0) {
+        folderId = folder.id;
+        const notes = [...folder.notes];
+        notes[existingIndex] = noteForEditor;
+        return { ...folder, notes };
+      }
+      if (folder.name === subject) {
+        folderId = folder.id;
+        const hasNote = folder.notes.some((n) => n.id === noteIdStr);
+        const notes = hasNote
+          ? folder.notes.map((n) => (n.id === noteIdStr ? noteForEditor : n))
+          : [...folder.notes, noteForEditor];
+        return { ...folder, notes };
+      }
+      return folder;
+    });
+
+    if (folderId == null) {
+      // No matching folder: add a new folder for this subject
+      folderId = String(folders.length + 1);
+      nextFolders.push({
+        id: folderId,
+        name: subject,
+        notes: [noteForEditor],
+        isExpanded: true,
+      });
+    }
+
+    const openFolderId: string = folderId;
+
+    setFolders(nextFolders);
+    setOpenTabs((prev) => {
+      const existing = prev.find((tab) => tab.id === noteIdStr);
+      if (existing) return prev.map((t) => (t.id === noteIdStr ? { ...t, title: noteForEditor.title } : t));
+      return [...prev, { id: noteIdStr, title: noteForEditor.title, folderId: openFolderId }];
+    });
+    setActiveTabId(noteIdStr);
+    onClearPreloadedNote?.();
+  }, [initialPreloadedNote, loading, folders, onClearPreloadedNote]);
+
+  // Pomodoro: get initial seconds for current phase
+  const getPomodoroPhaseMinutes = useCallback(() => {
+    if (pomodoroPhase === 'work') return workMinutes;
+    if (pomodoroPhase === 'shortBreak') return shortBreakMinutes;
+    return longBreakMinutes;
+  }, [pomodoroPhase, workMinutes, shortBreakMinutes, longBreakMinutes]);
+
+  const advancePomodoroPhase = useCallback(() => {
+    setPomodoroRunning(false);
+    if (pomodoroPhase === 'work') {
+      const nextCount = pomodoroCount + 1;
+      setPomodoroCount(nextCount);
+      if (nextCount >= pomodorosBeforeLongBreak) {
+        setPomodoroPhase('longBreak');
+        setPomodoroSecondsRemaining(longBreakMinutes * 60);
+        pomodoroInitialSecondsRef.current = longBreakMinutes * 60;
+      } else {
+        setPomodoroPhase('shortBreak');
+        setPomodoroSecondsRemaining(shortBreakMinutes * 60);
+        pomodoroInitialSecondsRef.current = shortBreakMinutes * 60;
+      }
+    } else {
+      if (pomodoroPhase === 'longBreak') setPomodoroCount(0);
+      setPomodoroPhase('work');
+      setPomodoroSecondsRemaining(workMinutes * 60);
+      pomodoroInitialSecondsRef.current = workMinutes * 60;
+    }
+  }, [pomodoroPhase, pomodoroCount, pomodorosBeforeLongBreak, workMinutes, shortBreakMinutes, longBreakMinutes]);
+
+  useEffect(() => {
+    if (!pomodoroRunning) return;
+    pomodoroIntervalRef.current = setInterval(() => {
+      setPomodoroSecondsRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => {
+      if (pomodoroIntervalRef.current) {
+        clearInterval(pomodoroIntervalRef.current);
+        pomodoroIntervalRef.current = null;
+      }
+    };
+  }, [pomodoroRunning]);
+
+  // When timer hits 0, advance to next phase
+  useEffect(() => {
+    if (!pomodoroRunning || pomodoroSecondsRemaining > 0) return;
+    advancePomodoroPhase();
+  }, [pomodoroRunning, pomodoroSecondsRemaining, advancePomodoroPhase]);
+
+  const startPomodoro = () => {
+    setPomodoroRunning(true);
+  };
+
+  const pausePomodoro = () => {
+    setPomodoroRunning(false);
+  };
+
+  const resetPomodoro = () => {
+    setPomodoroRunning(false);
+    const mins = getPomodoroPhaseMinutes();
+    setPomodoroSecondsRemaining(mins * 60);
+    pomodoroInitialSecondsRef.current = mins * 60;
+  };
+
+  const formatPomodoroTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // When duration settings change and timer is not running, update remaining time for current phase
+  useEffect(() => {
+    if (pomodoroRunning) return;
+    const mins = getPomodoroPhaseMinutes();
+    setPomodoroSecondsRemaining(mins * 60);
+    pomodoroInitialSecondsRef.current = mins * 60;
+  }, [workMinutes, shortBreakMinutes, longBreakMinutes, pomodoroPhase, pomodoroRunning, getPomodoroPhaseMinutes]);
 
   const handleTextSelection = () => {
     const selection = window.getSelection();
@@ -379,7 +585,32 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
                     onClick={() => handleNoteClick(note.id, note.title, folder.id)}
                   >
                     <FileText size={14} />
-                    <span>{note.title}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note.title}</span>
+                      {note.tags && note.tags.length > 0 && (
+                        <div style={{ display: 'flex', gap: '4px', marginTop: '2px', flexWrap: 'wrap' }}>
+                          {note.tags.slice(0, 3).map((tag, idx) => (
+                            <span 
+                              key={idx} 
+                              style={{ 
+                                fontSize: '0.65rem', 
+                                backgroundColor: '#e5e7eb', 
+                                padding: '1px 4px', 
+                                borderRadius: '3px',
+                                color: '#4b5563'
+                              }}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          {note.tags.length > 3 && (
+                            <span style={{ fontSize: '0.65rem', color: '#6b7280' }}>
+                              +{note.tags.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -391,11 +622,241 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
     ));
   };
 
+  // Get the currently active note
+  const getActiveNote = (): Note | null => {
+    for (const folder of folders) {
+      const note = folder.notes.find(n => n.id === activeTabId);
+      if (note) return note;
+      if (folder.subfolders) {
+        for (const subfolder of folder.subfolders) {
+          const subNote = subfolder.notes.find(n => n.id === activeTabId);
+          if (subNote) return subNote;
+        }
+      }
+    }
+    return null;
+  };
+
+  const activeNote = getActiveNote();
+
+  // Sync editor state when active note changes
+  useEffect(() => {
+    if (activeNote) {
+      setEditorTitle(activeNote.title);
+      setEditorBody(activeNote.content ?? '');
+      editorTitleRef.current = activeNote.title;
+      editorBodyRef.current = activeNote.content ?? '';
+    }
+  }, [activeTabId, activeNote?.id]);
+
+  const handleCreateFolder = () => {
+    const name = window.prompt('Folder name');
+    if (!name?.trim()) return;
+    const newFolder: LectureFolder = {
+      id: `folder-${Date.now()}`,
+      name: name.trim(),
+      notes: [],
+      isExpanded: true,
+    };
+    setFolders((prev) => [newFolder, ...prev]);
+  };
+
+  const pendingSaveRef = useRef<{ noteId: string; title: string; body: string }>({ noteId: '', title: '', body: '' });
+  const persistNote = useRef<(noteId: string, title: string, body: string) => void>(() => {});
+  persistNote.current = (noteId: string, title: string, body: string) => {
+    if (!noteId || noteId.startsWith('placeholder')) return;
+    const id = parseInt(noteId, 10);
+    if (Number.isNaN(id)) return;
+    setSaveStatus('saving');
+    updateNote(id, { content: { title: title || 'Untitled Note', body } })
+      .then((updated) => {
+        const newTitle = extractNoteTitle(updated);
+        const newContent = extractNoteContent(updated);
+        setFolders((prev) =>
+          prev.map((folder) => ({
+            ...folder,
+            notes: folder.notes.map((n) =>
+              n.id === noteId ? { ...n, title: newTitle, content: newContent } : n
+            ),
+          }))
+        );
+        setOpenTabs((tabs) =>
+          tabs.map((t) => (t.id === noteId ? { ...t, title: newTitle } : t))
+        );
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      })
+      .catch((err) => {
+        console.error('Failed to save note:', err);
+        setSaveStatus('idle');
+        setError(err instanceof Error ? err.message : 'Failed to save note.');
+      });
+  };
+
+  const scheduleSave = () => {
+    pendingSaveRef.current = {
+      noteId: activeTabId,
+      title: editorTitleRef.current,
+      body: editorBodyRef.current,
+    };
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      saveTimeoutRef.current = null;
+      const { noteId, title, body } = pendingSaveRef.current;
+      persistNote.current(noteId, title, body);
+    }, 600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, []);
+
+  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setEditorTitle(v);
+    editorTitleRef.current = v;
+    scheduleSave();
+  };
+
+  const handleBodyChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value;
+    setEditorBody(v);
+    editorBodyRef.current = v;
+    scheduleSave();
+  };
+
+  const handleAddTag = (tagName: string) => {
+    if (!activeNote || activeNote.id.startsWith('placeholder')) return;
+    const currentTags = activeNote.tags ?? [];
+    if (currentTags.includes(tagName)) return;
+    const newTags = [...currentTags, tagName];
+    const noteId = parseInt(activeNote.id, 10);
+    if (Number.isNaN(noteId)) return;
+    setTagSaving(true);
+    updateNote(noteId, {
+      content: { title: editorTitleRef.current || 'Untitled Note', body: editorBodyRef.current },
+      tags: newTags,
+    })
+      .then((updated) => {
+        const updatedTags = updated.tags ?? [];
+        setFolders((prev) =>
+          prev.map((folder) => ({
+            ...folder,
+            notes: folder.notes.map((n) =>
+              n.id === activeNote.id ? { ...n, tags: updatedTags } : n
+            ),
+          }))
+        );
+      })
+      .catch((err) => {
+        console.error('Failed to add tag:', err);
+        setError(err instanceof Error ? err.message : 'Failed to add tag.');
+      })
+      .finally(() => setTagSaving(false));
+  };
+
+  const handleRemoveTag = (tagName: string) => {
+    if (!activeNote || activeNote.id.startsWith('placeholder')) return;
+    const currentTags = activeNote.tags ?? [];
+    const newTags = currentTags.filter((t) => t !== tagName);
+    const noteId = parseInt(activeNote.id, 10);
+    if (Number.isNaN(noteId)) return;
+    setTagSaving(true);
+    updateNote(noteId, {
+      content: { title: editorTitleRef.current || 'Untitled Note', body: editorBodyRef.current },
+      tags: newTags,
+    })
+      .then((updated) => {
+        const updatedTags = updated.tags ?? [];
+        setFolders((prev) =>
+          prev.map((folder) => ({
+            ...folder,
+            notes: folder.notes.map((n) =>
+              n.id === activeNote.id ? { ...n, tags: updatedTags } : n
+            ),
+          }))
+        );
+      })
+      .catch((err) => {
+        console.error('Failed to remove tag:', err);
+        setError(err instanceof Error ? err.message : 'Failed to remove tag.');
+      })
+      .finally(() => setTagSaving(false));
+  };
+
+  const handleCreateNote = async () => {
+    const subject =
+      folders.length > 0 ? folders[0].name : 'Uncategorized';
+    try {
+      setError(null);
+      const created = await createNote(
+        {
+          content: { title: 'Untitled Note', body: '' },
+          subject,
+          tags: [],
+        },
+        DEFAULT_USER_ID
+      );
+      const notesData = await fetchNotes(DEFAULT_USER_ID);
+      setAllNotesData(notesData);
+      const grouped = groupNotesIntoFolders(notesData);
+      setFolders(grouped);
+      const newNote = {
+        id: created.id.toString(),
+        title: extractNoteTitle(created),
+        content: extractNoteContent(created),
+        tags: created.tags || [],
+      };
+      const folder = grouped.find((f) => f.name === subject);
+      const folderId = folder?.id ?? grouped[0]?.id ?? '1';
+      setOpenTabs((tabs) => [
+        ...tabs,
+        { id: newNote.id, title: newNote.title, folderId },
+      ]);
+      setActiveTabId(newNote.id);
+    } catch (err) {
+      console.error('Failed to create note:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create note.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="notes-page-container">
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <div className="notes-content-wrapper">
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%' }}>
+            <p>Loading notes...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="notes-page-container">
       <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
 
       <div className="notes-content-wrapper">
+        {error && (
+          <div style={{ 
+            padding: '1rem', 
+            backgroundColor: '#fee2e2', 
+            color: '#991b1b', 
+            borderRadius: '8px', 
+            margin: '1rem',
+            position: 'absolute',
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 100
+          }}>
+            {error}
+          </div>
+        )}
+        
         {/* Collapsible Notes Sidebar */}
         <aside className={`notes-sidebar ${notesSidebarCollapsed ? 'collapsed' : ''}`}>
           {!notesSidebarCollapsed && (
@@ -429,10 +890,6 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
                   title="New Note"
                 >
                   <FilePlus size={18} />
-                </button>
-
-                <button className="toolbar-btn" title="Settings">
-                  <Settings size={18} />
                 </button>
               </div>
 
@@ -496,51 +953,150 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
 
           {/* Editor Content */}
           <div className="editor-content" ref={editorRef}>
-            <h1 className="note-title-editable">Lecture 3 - Design Principles</h1>
+            {activeNote ? (
+              <>
+                {/* Spaced repetition toggle - top right when note is open */}
+                {!activeNote.id.startsWith('placeholder') && (
+                  <div className="note-spaced-rep-toggle">
+                    <Repeat size={16} aria-hidden />
+                    <label className="note-spaced-rep-label">
+                      <span>Mark for spaced repetition</span>
+                      <input
+                        type="checkbox"
+                        checked={spacedRepNoteIds.has(parseInt(activeNote.id, 10))}
+                        disabled={spacedRepToggling}
+                        onChange={(e) => handleSpacedRepToggle(e.target.checked)}
+                        className="note-spaced-rep-checkbox"
+                      />
+                      <span className="note-spaced-rep-slider" />
+                    </label>
+                  </div>
+                )}
 
-            <div className="note-body">
-              <h2>Core Design Principles</h2>
-              <p>
-                Design principles serve as fundamental guidelines for creating effective and user-friendly interfaces.
-                These principles help ensure consistency, usability, and accessibility across digital products.
-              </p>
+                {/* Editable title - input for real notes, static for placeholder */}
+                {activeNote.id.startsWith('placeholder') ? (
+                  <h1 className="note-title-editable">{activeNote.title}</h1>
+                ) : (
+                  <>
+                    <div className="note-editor-header">
+                      <input
+                        className="note-title-input"
+                        value={editorTitle}
+                        onChange={handleTitleChange}
+                        placeholder="Note title"
+                        aria-label="Note title"
+                      />
+                      {saveStatus !== 'idle' && (
+                        <span className={`note-save-status ${saveStatus}`}>
+                          {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
+                        </span>
+                      )}
+                    </div>
+                    {/* Tags section: chips + add */}
+                    <div className="note-tags-section">
+                      <div className="note-tags-row">
+                        <Tag size={16} className="note-tags-icon" aria-hidden />
+                        {(activeNote.tags ?? []).map((tag, idx) => (
+                          <span key={idx} className="note-tag-chip">
+                            {tag}
+                            <button
+                              type="button"
+                              className="note-tag-remove"
+                              onClick={() => handleRemoveTag(tag)}
+                              disabled={tagSaving}
+                              aria-label={`Remove tag ${tag}`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                        <div className="note-tag-add">
+                          <select
+                            className="note-tag-select"
+                            value=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v) {
+                                handleAddTag(v);
+                                e.target.value = '';
+                              }
+                            }}
+                            disabled={tagSaving}
+                            aria-label="Add tag"
+                          >
+                            <option value="">Add tag...</option>
+                            {availableTagNames
+                              .filter((name) => !(activeNote.tags ?? []).includes(name))
+                              .map((name) => (
+                                <option key={name} value={name}>
+                                  {name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <textarea
+                      className="note-body-textarea"
+                      value={editorBody}
+                      onChange={handleBodyChange}
+                      placeholder="Start writing your note..."
+                      aria-label="Note content"
+                      spellCheck
+                    />
+                  </>
+                )}
 
-              <h3>1. Visibility</h3>
-              <p>
-                The more visible an element is, the more likely users will know about it and how to use it.
-                Important functions should be easily discoverable.
-              </p>
-
-              <h3>2. Feedback</h3>
-              <p>
-                Users should receive immediate and clear feedback about their actions. This helps them understand
-                the system's state and whether their action was successful.
-              </p>
-
-              <h3>3. Constraints</h3>
-              <p>
-                Limiting the range of interaction possibilities helps prevent errors. Physical, logical, and
-                cultural constraints guide users toward appropriate actions.
-              </p>
-
-              <h3>4. Consistency</h3>
-              <p>
-                Similar elements should behave in similar ways. Consistency reduces the learning curve and
-                helps users transfer knowledge from one part of the interface to another.
-              </p>
-
-              <h3>5. Affordances</h3>
-              <p>
-                The design should suggest how an element should be used. Buttons should look clickable,
-                sliders should look draggable, and so on.
-              </p>
-
-              <h2>Practical Applications</h2>
-              <p>
-                When designing interfaces, always consider these principles together. A well-designed interface
-                balances all five principles to create an intuitive and efficient user experience.
-              </p>
-            </div>
+                {/* Read-only view for placeholder note */}
+                {activeNote.id.startsWith('placeholder') && (
+                  <>
+                    {activeNote.tags && activeNote.tags.length > 0 && (
+                      <div className="note-tags-row">
+                        <Tag size={16} style={{ color: '#6b7280' }} />
+                        {activeNote.tags.map((tag, idx) => (
+                          <span key={idx} className="note-tag-chip">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="note-body">
+                      {activeNote.content ? (
+                        activeNote.content.split('\n').map((line, idx) => {
+                          if (line.startsWith('## ')) {
+                            return <h2 key={idx}>{line.substring(3)}</h2>;
+                          } else if (line.startsWith('### ')) {
+                            return <h3 key={idx}>{line.substring(4)}</h3>;
+                          } else if (line.startsWith('# ')) {
+                            return <h2 key={idx}>{line.substring(2)}</h2>;
+                          } else if (line.startsWith('- ')) {
+                            return <li key={idx} style={{ marginLeft: '1.5rem' }}>{line.substring(2)}</li>;
+                          } else if (line.trim() === '') {
+                            return <br key={idx} />;
+                          } else {
+                            return <p key={idx}>{line}</p>;
+                          }
+                        })
+                      ) : (
+                        <p style={{ color: '#6b7280' }}>This note has no content yet.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                height: '50vh',
+                color: '#6b7280'
+              }}>
+                <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                <p>Select a note to view its content</p>
+              </div>
+            )}
 
             {/* Floating AI Help Button */}
             <button
@@ -623,17 +1179,117 @@ Low-fidelity for early exploration, high-fidelity for usability testing.`
             </div>
           )}
         </main>
+
+        {/* Collapsible Pomodoro Timer - right side */}
+        <aside className={`pomodoro-panel ${pomodoroCollapsed ? 'collapsed' : ''}`}>
+          {!pomodoroCollapsed && (
+            <>
+              <div className="pomodoro-header">
+                <Timer size={18} />
+                <span className="pomodoro-title">Pomodoro</span>
+                <button
+                  type="button"
+                  className="pomodoro-collapse-btn"
+                  onClick={() => setPomodoroCollapsed(true)}
+                  title="Collapse timer"
+                  aria-label="Collapse timer"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+              <div className="pomodoro-body">
+                <div className={`pomodoro-phase-badge ${pomodoroPhase}`}>
+                  {pomodoroPhase === 'work' && `Focus · ${pomodoroCount}/${pomodorosBeforeLongBreak}`}
+                  {pomodoroPhase === 'shortBreak' && 'Short break'}
+                  {pomodoroPhase === 'longBreak' && 'Long break'}
+                </div>
+                <div className="pomodoro-time">{formatPomodoroTime(pomodoroSecondsRemaining)}</div>
+                <div className="pomodoro-controls">
+                  <button
+                    type="button"
+                    className="pomodoro-btn primary"
+                    onClick={pomodoroRunning ? pausePomodoro : startPomodoro}
+                    title={pomodoroRunning ? 'Pause' : 'Start'}
+                  >
+                    {pomodoroRunning ? <Pause size={20} /> : <Play size={20} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="pomodoro-btn"
+                    onClick={resetPomodoro}
+                    title="Reset"
+                  >
+                    <RotateCcw size={18} />
+                  </button>
+                </div>
+                <div className="pomodoro-settings">
+                  <label className="pomodoro-setting">
+                    <span>Work (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={workMinutes}
+                      onChange={(e) => setWorkMinutes(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 25)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Short break (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={shortBreakMinutes}
+                      onChange={(e) => setShortBreakMinutes(Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 5)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Long break (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={45}
+                      value={longBreakMinutes}
+                      onChange={(e) => setLongBreakMinutes(Math.max(1, Math.min(45, parseInt(e.target.value, 10) || 15)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Pomodoros until long</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={8}
+                      value={pomodorosBeforeLongBreak}
+                      onChange={(e) => setPomodorosBeforeLongBreak(Math.max(2, Math.min(8, parseInt(e.target.value, 10) || 4)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
+
+        {pomodoroCollapsed && (
+          <div className="pomodoro-expand-container">
+            <button
+              type="button"
+              className="pomodoro-expand-btn"
+              onClick={() => setPomodoroCollapsed(false)}
+              title="Open Pomodoro timer"
+              aria-label="Open Pomodoro timer"
+            >
+              <ChevronLeft size={20} />
+              <Timer size={18} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
-};
-
-const handleCreateFolder = () => {
-  // Placeholder function
-};
-
-const handleCreateNote = () => {
-  // Placeholder function
 };
 
 export default Notes;
