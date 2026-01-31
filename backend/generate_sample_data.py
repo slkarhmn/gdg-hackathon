@@ -251,9 +251,8 @@ def create_sample_notes(user_id, count=10):
 
         note_data = {
             "content": {
-                "text": content_text,
-                "example": f"Example {i+1} for {subject}",
-                "summary": f"Summary of {subject} concepts",
+                "title": f"{subject} - Note {i+1}",
+                "body": content_text + f"\n\nSummary of {subject} concepts.\nExample {i+1} for {subject}.",
             },
             "subject": subject,
             "tags": selected_tags,

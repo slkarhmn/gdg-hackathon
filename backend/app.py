@@ -623,6 +623,94 @@ class SpacedRepList(Resource):
         return spaced_rep.to_dict(), 201
 
 
+@ns_spaced_reps.route('/user/<int:user_id>/record-review')
+@ns_spaced_reps.param('user_id', 'The user identifier')
+class RecordNoteReview(Resource):
+    @ns_spaced_reps.doc('record_note_review')
+    @ns_spaced_reps.expect(spaced_rep_input)
+    @ns_spaced_reps.marshal_with(spaced_rep_output)
+    def post(self, user_id):
+        """Record opening a note as a repetition (creates SpacedRepetition for note if needed)."""
+        user = User.query.get_or_404(user_id)
+        data = request.json
+        if not data or 'note_id' not in data:
+            api.abort(400, 'note_id is required')
+        note_id = data['note_id']
+        Note.query.get_or_404(note_id)
+
+        spaced_rep = SpacedRepetition.query.filter_by(
+            user_id=user_id,
+            note_id=note_id
+        ).first()
+
+        if not spaced_rep:
+            spaced_rep = SpacedRepetition(
+                user_id=user_id,
+                note_id=note_id,
+                repetition_dates=json.dumps([]),
+                revision_count=0,
+                next_review_date=datetime.utcnow() + timedelta(days=1)
+            )
+            db.session.add(spaced_rep)
+            db.session.flush()
+
+        spaced_rep.revision_count += 1
+        rep_dates = json.loads(spaced_rep.repetition_dates) if spaced_rep.repetition_dates else []
+        rep_dates.append(datetime.utcnow().isoformat())
+        spaced_rep.repetition_dates = json.dumps(rep_dates)
+        intervals = [1, 3, 7, 14, 30, 60, 90]
+        interval_index = min(spaced_rep.revision_count - 1, len(intervals) - 1)
+        next_interval = intervals[interval_index]
+        spaced_rep.next_review_date = datetime.utcnow() + timedelta(days=next_interval)
+        db.session.commit()
+        return spaced_rep.to_dict()
+
+
+@ns_spaced_reps.route('/user/<int:user_id>/note/<int:note_id>')
+@ns_spaced_reps.param('user_id', 'The user identifier')
+@ns_spaced_reps.param('note_id', 'The note identifier')
+class SpacedRepByNote(Resource):
+    @ns_spaced_reps.doc('remove_note_from_spaced_repetition')
+    def delete(self, user_id, note_id):
+        """Remove a note from spaced repetition (unmark for spaced repetition)."""
+        spaced_rep = SpacedRepetition.query.filter_by(
+            user_id=user_id,
+            note_id=note_id
+        ).first()
+        if spaced_rep:
+            db.session.delete(spaced_rep)
+            db.session.commit()
+        return '', 204
+
+
+@ns_spaced_reps.route('/user/<int:user_id>/heatmap')
+@ns_spaced_reps.param('user_id', 'The user identifier')
+@ns_spaced_reps.param('year', 'Year for heatmap (default: current year)', _in='query')
+class SpacedRepHeatmap(Resource):
+    @ns_spaced_reps.doc('get_heatmap_counts')
+    def get(self, user_id):
+        """Get daily repetition counts for heatmap (reviews per calendar day, optionally for a year)."""
+        user = User.query.get_or_404(user_id)
+        year_arg = request.args.get('year', type=int)
+        year = year_arg if year_arg else datetime.utcnow().year
+
+        spaced_reps = SpacedRepetition.query.filter_by(user_id=user_id).all()
+        daily_counts = {}
+
+        for sr in spaced_reps:
+            rep_dates = json.loads(sr.repetition_dates) if sr.repetition_dates else []
+            for date_str in rep_dates:
+                try:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    if dt.year == year:
+                        date_key = dt.strftime('%Y-%m-%d')
+                        daily_counts[date_key] = daily_counts.get(date_key, 0) + 1
+                except (ValueError, TypeError):
+                    continue
+
+        return {'year': year, 'daily_counts': daily_counts}, 200
+
+
 @ns_spaced_reps.route('/<int:rep_id>/review')
 @ns_spaced_reps.param('rep_id', 'The spaced repetition identifier')
 class ReviewSpacedRep(Resource):
