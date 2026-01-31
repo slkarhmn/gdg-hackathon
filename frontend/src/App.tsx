@@ -8,6 +8,7 @@ import Grades from './pages/Grades';
 import Calendar from './pages/Calendar';
 import ToDo from './pages/ToDo';
 import GetHelp from './pages/GetHelp';
+import ProfessorDashboard from './pages/Professordashboard';
 import './styles/globals.css';
 
 // Main App Component (wrapped with auth)
@@ -15,6 +16,9 @@ function AppContent() {
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
   const { isAuthenticated, isLoading, account, getAccessToken } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  
+  // Check if user is professor/admin (you can customize this logic)
+  const isProfessor = true; // Set to true for demo, or check account.jobTitle, account.roles, etc.
 
   // Get access token when user is authenticated
   useEffect(() => {
@@ -25,9 +29,8 @@ function AppContent() {
       }
     };
     fetchToken();
-  }, [isAuthenticated]); // Remove getAccessToken from here
+  }, [isAuthenticated]);
 
-  
   // Initialize Graph Service
   const graphService = useGraphService(accessToken);
 
@@ -68,7 +71,7 @@ function AppContent() {
   const renderPage = () => {
     const pageProps = {
       onNavigate: setCurrentPage,
-      graphService, // Pass Graph Service to pages that need it
+      graphService,
       userProfile: account,
     };
 
@@ -87,6 +90,8 @@ function AppContent() {
         return <ToDo {...pageProps} />;
       case 'help':
         return <GetHelp {...pageProps} />;
+      case 'professor':
+        return <ProfessorDashboard {...pageProps} />;
       default:
         return <Dashboard {...pageProps} />;
     }

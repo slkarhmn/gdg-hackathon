@@ -1,14 +1,26 @@
 import React from 'react';
-import { LayoutGrid, FolderOpen, Calendar, Percent, List, HelpCircle, LogOut } from 'lucide-react';
+import { 
+  LayoutGrid, 
+  FolderOpen, 
+  Calendar, 
+  Percent, 
+  List, 
+  HelpCircle,
+  GraduationCap,
+  LogOut,
+  User
+} from 'lucide-react';
+import { useAuth } from '../../auth/AuthContext';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  account?: { name: string };
-  logout?: () => void;
+  isProfessor?: boolean; // Add prop to toggle professor view
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, account, logout }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isProfessor = false }) => {
+  const { account, logout } = useAuth();
+
   return (
     <aside className="sidebar">
       <div className="logo">
@@ -28,10 +40,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, account, log
 
         <button
           className={`nav-item ${activeTab === 'notes' ? 'active' : ''}`}
-          onClick={() => {
-            console.log('Notes button clicked'); // Debug log
-            setActiveTab('notes');
-          }}
+          onClick={() => setActiveTab('notes')}
           title="Notes"
         >
           <FolderOpen size={24} />
@@ -60,6 +69,17 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, account, log
         >
           <List size={24} />
         </button>
+
+        {/* Professor Section - Only show if user is professor/admin */}
+        
+          <button
+            className={`nav-item ${activeTab === 'professor' ? 'active' : ''}`}
+            onClick={() => setActiveTab('professor')}
+            title="Professor Tools"
+          >
+            <GraduationCap size={24} />
+          </button>
+      
       </nav>
 
       <div className="nav-bottom">
@@ -71,18 +91,21 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, account, log
           <HelpCircle size={24} />
         </button>
 
-        <div className="profile-section">
-          <div className="profile-avatar">
-            {account?.name?.charAt(0) || 'U'}
+        {/* Profile Section */}
+        {account && (
+          <div className="profile-section">
+            <div className="profile-avatar" title={account.name || 'User'}>
+              {account.name?.charAt(0).toUpperCase() || 'U'}
+            </div>
+            <button 
+              className="logout-btn" 
+              onClick={logout}
+              title="Sign out"
+            >
+              <LogOut size={18} />
+            </button>
           </div>
-          <button 
-            className="logout-btn" 
-            onClick={logout}
-            title="Sign out"
-          >
-            <LogOut size={18} />
-          </button>
-        </div>
+        )}
       </div>
     </aside>
   );
