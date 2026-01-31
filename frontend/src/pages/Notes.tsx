@@ -46,6 +46,8 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface NotesProps {
   onNavigate: (page: Page) => void;
+  initialOpenNoteId?: string | null;
+  onInitialOpenNoteHandled?: () => void;
 }
 
 // Helper to extract title from note content
@@ -117,12 +119,15 @@ function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
   return folders;
 }
 
-const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
+const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialOpenNoteHandled }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('notes');
   const [folders, setFolders] = useState<LectureFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setAllNotesData] = useState<BackendNote[]>([]);
+  const handledInitialOpenNoteIdRef = useRef<string | null>(null);
+  const initialOpenNoteIdRef = useRef<string | null>(null);
+  initialOpenNoteIdRef.current = initialOpenNoteId ?? null;
 
   // Fetch notes from API
   useEffect(() => {
@@ -162,8 +167,8 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
         } else {
           setFolders(groupedFolders);
           
-          // Set initial tab to first note of first folder
-          if (groupedFolders[0]?.notes[0]) {
+          // Only set initial tab to first note when not opening a specific note (e.g. from Grades)
+          if (!initialOpenNoteIdRef.current && groupedFolders[0]?.notes[0]) {
             const firstNote = groupedFolders[0].notes[0];
             setOpenTabs([{ id: firstNote.id, title: firstNote.title, folderId: groupedFolders[0].id }]);
             setActiveTabId(firstNote.id);
@@ -289,6 +294,28 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
       setActiveTabId(newTabs[newTabs.length - 1].id);
     }
   };
+
+  // Open a specific note when navigating from Grades (or elsewhere) with initialOpenNoteId
+  useEffect(() => {
+    if (!initialOpenNoteId || loading || folders.length === 0) return;
+    if (handledInitialOpenNoteIdRef.current === initialOpenNoteId) return;
+
+    for (const folder of folders) {
+      const note = folder.notes.find((n) => n.id === initialOpenNoteId);
+      if (note) {
+        handledInitialOpenNoteIdRef.current = initialOpenNoteId;
+        setOpenTabs((prev) => {
+          const existing = prev.find((tab) => tab.id === initialOpenNoteId);
+          if (existing) return prev;
+          return [...prev, { id: note.id, title: note.title, folderId: folder.id }];
+        });
+        setActiveTabId(note.id);
+        onInitialOpenNoteHandled?.();
+        return;
+      }
+    }
+    onInitialOpenNoteHandled?.();
+  }, [initialOpenNoteId, loading, folders, onInitialOpenNoteHandled]);
 
   const handleTextSelection = () => {
     const selection = window.getSelection();

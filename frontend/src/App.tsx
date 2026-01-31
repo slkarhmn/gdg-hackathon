@@ -7,18 +7,36 @@ import ToDo from './pages/ToDo';
 import GetHelp from './pages/GetHelp';
 import './styles/globals.css';
 
+export type NavigateOptions = { openNoteId?: string };
+
 function App() {
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
+  const [notesOpenNoteId, setNotesOpenNoteId] = useState<string | null>(null);
+
+  const handleNavigate = (page: string, options?: NavigateOptions) => {
+    setCurrentPage(page);
+    if (page === 'notes' && options?.openNoteId != null) {
+      setNotesOpenNoteId(options.openNoteId);
+    } else {
+      setNotesOpenNoteId(null);
+    }
+  };
 
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':
         return <Dashboard onNavigate={setCurrentPage} />;
       case 'notes':
-        return <Notes onNavigate={setCurrentPage} />;
+        return (
+          <Notes
+            onNavigate={setCurrentPage}
+            initialOpenNoteId={notesOpenNoteId}
+            onInitialOpenNoteHandled={() => setNotesOpenNoteId(null)}
+          />
+        );
       case 'grades':
       case 'analytics':
-        return <Grades onNavigate={setCurrentPage} />;
+        return <Grades onNavigate={handleNavigate} />;
       case 'calendar':
         return <Calendar onNavigate={setCurrentPage} />;
       case 'files':

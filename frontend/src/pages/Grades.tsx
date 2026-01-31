@@ -68,7 +68,7 @@ interface CourseGrade {
 type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades' | 'todo' | 'help';
 
 interface GradesProps {
-  onNavigate: (page: Page) => void;
+  onNavigate: (page: Page, options?: { openNoteId?: string }) => void;
 }
 
 // Helper to extract title from note content
@@ -684,7 +684,19 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
                   <div className="related-notes-list">
                     {relatedNotesForSelected.length > 0 ? (
                       relatedNotesForSelected.map(note => (
-                        <div key={note.id} className="related-note-card">
+                        <div
+                          key={note.id}
+                          className="related-note-card"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onNavigate('notes', { openNoteId: note.id })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onNavigate('notes', { openNoteId: note.id });
+                            }
+                          }}
+                        >
                           <div className="note-card-header">
                             <FileText size={16} />
                             <h4>{note.title}</h4>
