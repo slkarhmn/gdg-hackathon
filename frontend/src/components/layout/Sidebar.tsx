@@ -1,12 +1,14 @@
 import React from 'react';
-import { LayoutGrid, FolderOpen, Calendar, Percent, List, HelpCircle } from 'lucide-react';
+import { LayoutGrid, FolderOpen, Calendar, Percent, List, HelpCircle, LogOut } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  account?: { name: string };
+  logout?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, account, logout }) => {
   return (
     <aside className="sidebar">
       <div className="logo">
@@ -68,6 +70,19 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
         >
           <HelpCircle size={24} />
         </button>
+
+        <div className="profile-section">
+          <div className="profile-avatar">
+            {account?.name?.charAt(0) || 'U'}
+          </div>
+          <button 
+            className="logout-btn" 
+            onClick={logout}
+            title="Sign out"
+          >
+            <LogOut size={18} />
+          </button>
+        </div>
       </div>
     </aside>
   );
