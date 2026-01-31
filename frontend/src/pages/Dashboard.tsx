@@ -10,15 +10,16 @@ import {
   fetchUpcomingAssignments,
   toDashboardAssignments,
   fetchNotes,
+  fetchNoteById,
   toDashboardNotes,
   fetchSpacedRepetitions,
   toHeatmapData,
   getDueForReview
 } from '../api';
-import type { BackendSpacedRepetition } from '../api';
+import type { BackendSpacedRepetition, BackendNote } from '../api';
 
 interface DashboardProps {
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, options?: { preloadedNote?: BackendNote }) => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
@@ -156,9 +157,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     onNavigate(tab);
   };
 
-  const handleNoteClick = (noteId: number) => {
-    console.log('Note clicked:', noteId);
-    onNavigate('notes');
+  const [openingNoteId, setOpeningNoteId] = useState<number | null>(null);
+
+  const handleNoteClick = async (noteId: number) => {
+    if (openingNoteId !== null) return; // Prevent multiple clicks
+    setOpeningNoteId(noteId);
+    try {
+      const fetchedNote = await fetchNoteById(noteId);
+      onNavigate('notes', { preloadedNote: fetchedNote });
+    } catch (err) {
+      console.error('Failed to fetch note:', err);
+      setOpeningNoteId(null);
+    }
   };
 
   const handleTodoToggle = (todoId: number) => {
