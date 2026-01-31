@@ -1,365 +1,467 @@
 import React, { useState } from 'react';
 import Sidebar from '../components/layout/Sidebar';
-import Header from '../components/layout/Header';
-import { 
-  BookOpen, 
-  FileText, 
+import {
+  Plus,
   Calendar,
+  Clock,
   Tag,
+  FileText,
+  MessageSquare,
+  Send,
+  Calculator,
   TrendingUp,
-  Award,
+  CheckCircle2,
+  Circle,
   ChevronRight,
   Filter,
-  Search
+  Search,
+  BookOpen,
+  Target,
+  Sparkles
 } from 'lucide-react';
 import './Grades.css';
 
-interface AssignmentGrade {
+interface Assignment {
   id: string;
   title: string;
-  subject: string;
-  grade: number;
-  maxGrade: number;
-  date: string;
-  topics: string[];
-  status: 'graded' | 'pending' | 'upcoming';
+  course: string;
+  dueDate: string;
+  status: 'upcoming' | 'completed' | 'overdue';
+  grade?: number;
+  weight: number;
+  tags: string[];
 }
 
-interface NoteResource {
+interface Note {
   id: string;
   title: string;
-  topic: string;
-  lastReviewed: string;
+  tags: string[];
+  preview: string;
 }
 
-type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades';
+interface CourseGrade {
+  id: string;
+  courseName: string;
+  currentGrade: number;
+  targetGrade: number;
+  assignments: {
+    name: string;
+    grade: number;
+    weight: number;
+    completed: boolean;
+  }[];
+}
+
+type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades' | 'todo' | 'help';
 
 interface GradesProps {
   onNavigate: (page: Page) => void;
 }
 
 const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
-  const [activeTab, setActiveTab] = useState('grades');
-  const [selectedAssignment, setSelectedAssignment] = useState<string | null>('1');
+  const [mainSidebarTab, setMainSidebarTab] = useState('analytics');
+  const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
+  const [showAddAssignment, setShowAddAssignment] = useState(false);
+  const [showGradeCalculator, setShowGradeCalculator] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'upcoming' | 'completed'>('all');
 
-  const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
-    onNavigate(tab as Page);
-  };
-
-  const assignments: AssignmentGrade[] = [
+  const [assignments, setAssignments] = useState<Assignment[]>([
     {
       id: '1',
-      title: 'JavaFX GUI Development Test',
-      subject: 'Object-Oriented Programming',
-      grade: 87,
-      maxGrade: 100,
-      date: 'Jan 28, 2026',
-      topics: ['JavaFX', 'GUI Design', 'Event Handling', 'Scene Builder'],
-      status: 'graded'
+      title: 'JavaFX GUI Application',
+      course: 'Software Development',
+      dueDate: '2026-02-10',
+      status: 'upcoming',
+      weight: 20,
+      tags: ['javafx', 'gui', 'programming']
     },
     {
       id: '2',
-      title: 'Database Normalization Assignment',
-      subject: 'Database Systems',
-      grade: 92,
-      maxGrade: 100,
-      date: 'Jan 25, 2026',
-      topics: ['Normalization', 'SQL', 'Entity Relationships', '3NF'],
-      status: 'graded'
+      title: 'User Research Report',
+      course: 'Human Computer Interaction',
+      dueDate: '2026-02-05',
+      status: 'upcoming',
+      weight: 15,
+      tags: ['hci', 'research', 'user-testing']
     },
     {
       id: '3',
-      title: 'UX Research Project',
-      subject: 'Human Computer Interaction',
-      grade: 0,
-      maxGrade: 100,
-      date: 'Feb 5, 2026',
-      topics: ['User Research', 'Personas', 'Usability Testing', 'Prototyping'],
-      status: 'upcoming'
+      title: 'Database Design Project',
+      course: 'Database Systems',
+      dueDate: '2026-01-28',
+      status: 'completed',
+      grade: 92,
+      weight: 25,
+      tags: ['sql', 'database', 'design']
     },
     {
       id: '4',
-      title: 'Algorithm Analysis Quiz',
-      subject: 'Data Structures',
-      grade: 0,
-      maxGrade: 50,
-      date: 'Feb 1, 2026',
-      topics: ['Big O Notation', 'Sorting Algorithms', 'Time Complexity'],
-      status: 'pending'
-    },
-    {
-      id: '5',
-      title: 'Process Scheduling Lab',
-      subject: 'Operating Systems',
-      grade: 78,
-      maxGrade: 100,
-      date: 'Jan 20, 2026',
-      topics: ['Process Management', 'CPU Scheduling', 'FCFS', 'Round Robin'],
-      status: 'graded'
-    },
-    {
-      id: '6',
-      title: 'Midterm Examination',
-      subject: 'Human Computer Interaction',
-      grade: 85,
-      maxGrade: 100,
-      date: 'Jan 15, 2026',
-      topics: ['Design Principles', 'Cognitive Psychology', 'Interface Design'],
-      status: 'graded'
+      title: 'Binary Search Tree Implementation',
+      course: 'Data Structures',
+      dueDate: '2026-01-25',
+      status: 'completed',
+      grade: 88,
+      weight: 20,
+      tags: ['algorithms', 'data-structures', 'java']
     }
-  ];
+  ]);
 
-  const noteResources: { [key: string]: NoteResource[] } = {
+  const [relatedNotes] = useState<{ [key: string]: Note[] }>({
     '1': [
-      { id: 'n1', title: 'JavaFX Basics - Lecture 12', topic: 'JavaFX', lastReviewed: '2 days ago' },
-      { id: 'n2', title: 'Scene Builder Tutorial', topic: 'GUI Design', lastReviewed: '4 days ago' },
-      { id: 'n3', title: 'Event Handling in JavaFX', topic: 'Event Handling', lastReviewed: '1 week ago' },
-      { id: 'n4', title: 'Layout Managers - FXML', topic: 'JavaFX', lastReviewed: '5 days ago' },
-      { id: 'n5', title: 'JavaFX Controls Deep Dive', topic: 'GUI Design', lastReviewed: '3 days ago' }
+      { id: 'n1', title: 'JavaFX Basics - Lecture 5', tags: ['javafx', 'gui'], preview: 'Introduction to JavaFX scene graph, layouts, and event handling...' },
+      { id: 'n2', title: 'JavaFX Advanced Components', tags: ['javafx', 'programming'], preview: 'TableView, TreeView, and custom controls in JavaFX...' },
+      { id: 'n3', title: 'GUI Design Patterns', tags: ['gui', 'design'], preview: 'MVC, MVP, and MVVM patterns for GUI applications...' }
     ],
     '2': [
-      { id: 'n6', title: 'Database Normalization Rules', topic: 'Normalization', lastReviewed: '1 week ago' },
-      { id: 'n7', title: 'SQL Joins and Relationships', topic: 'SQL', lastReviewed: '6 days ago' },
-      { id: 'n8', title: 'Third Normal Form (3NF)', topic: '3NF', lastReviewed: '4 days ago' }
+      { id: 'n4', title: 'User Research Methods', tags: ['hci', 'research'], preview: 'Qualitative and quantitative research methods...' },
+      { id: 'n5', title: 'Usability Testing Guide', tags: ['hci', 'user-testing'], preview: 'Planning and conducting usability tests...' }
     ],
     '3': [
-      { id: 'n9', title: 'User Research Methods', topic: 'User Research', lastReviewed: '2 days ago' },
-      { id: 'n10', title: 'Creating User Personas', topic: 'Personas', lastReviewed: '1 day ago' },
-      { id: 'n11', title: 'Usability Testing Guide', topic: 'Usability Testing', lastReviewed: '3 days ago' },
-      { id: 'n12', title: 'Rapid Prototyping Techniques', topic: 'Prototyping', lastReviewed: 'Today' }
+      { id: 'n6', title: 'SQL Fundamentals', tags: ['sql', 'database'], preview: 'SELECT, JOIN, and aggregate functions...' },
+      { id: 'n7', title: 'Database Normalization', tags: ['database', 'design'], preview: '1NF, 2NF, 3NF, and BCNF explained...' }
     ],
     '4': [
-      { id: 'n13', title: 'Big O Notation Explained', topic: 'Big O Notation', lastReviewed: '1 week ago' },
-      { id: 'n14', title: 'Sorting Algorithms Comparison', topic: 'Sorting Algorithms', lastReviewed: '5 days ago' }
-    ],
-    '5': [
-      { id: 'n15', title: 'Process Management Overview', topic: 'Process Management', lastReviewed: '2 weeks ago' },
-      { id: 'n16', title: 'CPU Scheduling Algorithms', topic: 'CPU Scheduling', lastReviewed: '10 days ago' }
-    ],
-    '6': [
-      { id: 'n17', title: 'Design Principles - Lecture 3', topic: 'Design Principles', lastReviewed: '3 weeks ago' },
-      { id: 'n18', title: 'Cognitive Psychology in HCI', topic: 'Cognitive Psychology', lastReviewed: '2 weeks ago' }
+      { id: 'n8', title: 'Binary Trees Overview', tags: ['data-structures'], preview: 'Tree traversal algorithms and properties...' },
+      { id: 'n9', title: 'BST Operations', tags: ['algorithms', 'data-structures'], preview: 'Insert, delete, and search operations...' }
     ]
+  });
+
+  const [courseGrades] = useState<CourseGrade[]>([
+    {
+      id: '1',
+      courseName: 'Human Computer Interaction',
+      currentGrade: 87,
+      targetGrade: 90,
+      assignments: [
+        { name: 'Assignment 1', grade: 85, weight: 15, completed: true },
+        { name: 'Assignment 2', grade: 90, weight: 15, completed: true },
+        { name: 'Midterm', grade: 88, weight: 30, completed: true },
+        { name: 'Final Project', grade: 0, weight: 40, completed: false }
+      ]
+    },
+    {
+      id: '2',
+      courseName: 'Database Systems',
+      currentGrade: 92,
+      targetGrade: 95,
+      assignments: [
+        { name: 'SQL Assignment', grade: 95, weight: 20, completed: true },
+        { name: 'Design Project', grade: 92, weight: 25, completed: true },
+        { name: 'Final Exam', grade: 0, weight: 55, completed: false }
+      ]
+    }
+  ]);
+
+  const handleTabChange = (tab: string) => {
+    setMainSidebarTab(tab);
+    onNavigate(tab as Page);
   };
 
-  const getGradePercentage = (grade: number, max: number) => {
-    return Math.round((grade / max) * 100);
+  const calculateRequiredGrade = (course: CourseGrade) => {
+    const completedWeight = course.assignments
+      .filter(a => a.completed)
+      .reduce((sum, a) => sum + a.weight, 0);
+
+    const currentPoints = course.assignments
+      .filter(a => a.completed)
+      .reduce((sum, a) => sum + (a.grade * a.weight / 100), 0);
+
+    const remainingWeight = 100 - completedWeight;
+
+    if (remainingWeight === 0) return null;
+
+    const requiredPoints = course.targetGrade - currentPoints;
+    const requiredGrade = (requiredPoints / remainingWeight) * 100;
+
+    return Math.max(0, Math.min(100, requiredGrade));
   };
 
-  const getGradeColor = (percentage: number) => {
-    if (percentage >= 90) return 'grade-a';
-    if (percentage >= 80) return 'grade-b';
-    if (percentage >= 70) return 'grade-c';
-    if (percentage >= 60) return 'grade-d';
-    return 'grade-f';
-  };
+  const filteredAssignments = assignments.filter(assignment => {
+    const matchesSearch = assignment.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      assignment.course.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter = filterStatus === 'all' || assignment.status === filterStatus;
+    return matchesSearch && matchesFilter;
+  });
 
-  const getStatusBadge = (status: string) => {
-    const badges = {
-      graded: { text: 'Graded', class: 'status-graded' },
-      pending: { text: 'Pending', class: 'status-pending' },
-      upcoming: { text: 'Upcoming', class: 'status-upcoming' }
-    };
-    return badges[status as keyof typeof badges];
-  };
-
-  const selectedAssignmentData = assignments.find(a => a.id === selectedAssignment);
-  const selectedNotes = selectedAssignment ? noteResources[selectedAssignment] || [] : [];
-
-  // Calculate overall stats
-  const gradedAssignments = assignments.filter(a => a.status === 'graded');
-  const totalPercentage = gradedAssignments.length > 0
-    ? Math.round(gradedAssignments.reduce((sum, a) => sum + getGradePercentage(a.grade, a.maxGrade), 0) / gradedAssignments.length)
-    : 0;
+  const upcomingAssignments = assignments.filter(a => a.status === 'upcoming');
+  const completedAssignments = assignments.filter(a => a.status === 'completed');
 
   return (
-    <div className="grades-container">
-      <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} />
-      
-      <main className="grades-main">
-        <Header userName="Saachi" />
+    <div className="grades-page-container">
+      <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
 
-        {/* Stats Overview */}
-        <div className="grades-stats">
-          <div className="stat-card">
-            <div className="stat-icon">
-              <TrendingUp size={24} />
-            </div>
-            <div className="stat-info">
-              <div className="stat-value">{totalPercentage}%</div>
-              <div className="stat-label">Overall Average</div>
-            </div>
+      <div className="grades-content-wrapper">
+        {/* Assignments Sidebar */}
+        <aside className="assignments-sidebar">
+          <div className="assignments-sidebar-header">
+            <h2>Assignments</h2>
+            <button
+              className="add-assignment-btn"
+              onClick={() => setShowAddAssignment(true)}
+            >
+              <Plus size={18} />
+            </button>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon award">
-              <Award size={24} />
-            </div>
-            <div className="stat-info">
-              <div className="stat-value">{gradedAssignments.length}</div>
-              <div className="stat-label">Completed</div>
-            </div>
+
+          <div className="assignments-search">
+            <Search size={16} />
+            <input
+              type="text"
+              placeholder="Search assignments..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
-          <div className="stat-card">
-            <div className="stat-icon pending">
-              <Calendar size={24} />
-            </div>
-            <div className="stat-info">
-              <div className="stat-value">{assignments.filter(a => a.status !== 'graded').length}</div>
-              <div className="stat-label">Pending</div>
-            </div>
+
+          <div className="filter-tabs">
+            <button
+              className={`filter-tab ${filterStatus === 'all' ? 'active' : ''}`}
+              onClick={() => setFilterStatus('all')}
+            >
+              All ({assignments.length})
+            </button>
+            <button
+              className={`filter-tab ${filterStatus === 'upcoming' ? 'active' : ''}`}
+              onClick={() => setFilterStatus('upcoming')}
+            >
+              Upcoming ({upcomingAssignments.length})
+            </button>
+            <button
+              className={`filter-tab ${filterStatus === 'completed' ? 'active' : ''}`}
+              onClick={() => setFilterStatus('completed')}
+            >
+              Completed ({completedAssignments.length})
+            </button>
           </div>
-        </div>
 
-        {/* Two Column Layout */}
-        <div className="grades-content">
-          {/* Left Column - Assignments List */}
-          <div className="assignments-column">
-            <div className="column-header">
-              <h2>Assignments</h2>
-              <div className="header-actions">
-                <button className="filter-btn">
-                  <Filter size={18} />
-                </button>
-              </div>
-            </div>
-
-            <div className="search-box">
-              <Search size={16} />
-              <input 
-                type="text" 
-                placeholder="Search assignments..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-
-            <div className="assignments-list">
-              {assignments.map(assignment => {
-                const percentage = getGradePercentage(assignment.grade, assignment.maxGrade);
-                const statusBadge = getStatusBadge(assignment.status);
-                
-                return (
-                  <div
-                    key={assignment.id}
-                    className={`assignment-card ${selectedAssignment === assignment.id ? 'active' : ''}`}
-                    onClick={() => setSelectedAssignment(assignment.id)}
-                  >
-                    <div className="assignment-header">
-                      <div className="assignment-title-section">
-                        <h3>{assignment.title}</h3>
-                        <p className="assignment-subject">{assignment.subject}</p>
-                      </div>
-                      <div className={`status-badge ${statusBadge.class}`}>
-                        {statusBadge.text}
-                      </div>
-                    </div>
-
-                    <div className="assignment-meta">
-                      <div className="meta-item">
-                        <Calendar size={14} />
-                        <span>{assignment.date}</span>
-                      </div>
-                      {assignment.status === 'graded' && (
-                        <div className={`grade-badge ${getGradeColor(percentage)}`}>
-                          {assignment.grade}/{assignment.maxGrade} ({percentage}%)
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="assignment-topics">
-                      {assignment.topics.slice(0, 3).map((topic, idx) => (
-                        <span key={idx} className="topic-tag">
-                          <Tag size={10} />
-                          {topic}
-                        </span>
-                      ))}
-                      {assignment.topics.length > 3 && (
-                        <span className="topic-tag more">+{assignment.topics.length - 3}</span>
-                      )}
-                    </div>
+          <div className="assignments-list">
+            {filteredAssignments.map(assignment => (
+              <div
+                key={assignment.id}
+                className={`assignment-card ${selectedAssignment?.id === assignment.id ? 'selected' : ''}`}
+                onClick={() => setSelectedAssignment(assignment)}
+              >
+                <div className="assignment-card-header">
+                  <div className="assignment-status-icon">
+                    {assignment.status === 'completed' ? (
+                      <CheckCircle2 size={18} color="#6B9080" />
+                    ) : (
+                      <Circle size={18} color="#9ca3af" />
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right Column - Assignment Details & Resources */}
-          <div className="details-column">
-            {selectedAssignmentData ? (
-              <>
-                <div className="details-header">
-                  <div className="details-title-section">
-                    <h2>{selectedAssignmentData.title}</h2>
-                    <p className="details-subject">{selectedAssignmentData.subject}</p>
+                  <div className="assignment-card-info">
+                    <h3 className="assignment-card-title">{assignment.title}</h3>
+                    <p className="assignment-card-course">{assignment.course}</p>
                   </div>
-                  {selectedAssignmentData.status === 'graded' && (
-                    <div className={`details-grade ${getGradeColor(getGradePercentage(selectedAssignmentData.grade, selectedAssignmentData.maxGrade))}`}>
-                      <div className="grade-score">{selectedAssignmentData.grade}</div>
-                      <div className="grade-max">/ {selectedAssignmentData.maxGrade}</div>
-                    </div>
+                </div>
+                <div className="assignment-card-meta">
+                  <div className="meta-item">
+                    <Calendar size={12} />
+                    <span>{new Date(assignment.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                  </div>
+                  <div className="meta-item">
+                    <Target size={12} />
+                    <span>{assignment.weight}%</span>
+                  </div>
+                  {assignment.grade !== undefined && (
+                    <div className="grade-badge">{assignment.grade}%</div>
                   )}
                 </div>
-
-                <div className="details-info">
-                  <div className="info-item">
-                    <Calendar size={16} />
-                    <span>Due: {selectedAssignmentData.date}</span>
-                  </div>
-                  <div className="info-item">
-                    <BookOpen size={16} />
-                    <span>{selectedNotes.length} Related Notes</span>
-                  </div>
-                </div>
-
-                <div className="topics-section">
-                  <h3>Topics Covered</h3>
-                  <div className="topics-grid">
-                    {selectedAssignmentData.topics.map((topic, idx) => (
-                      <div key={idx} className="topic-chip">
-                        <Tag size={14} />
-                        {topic}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="resources-section">
-                  <div className="section-header">
-                    <h3>Study Resources</h3>
-                    <span className="resource-count">{selectedNotes.length} notes</span>
-                  </div>
-                  
-                  <div className="resources-list">
-                    {selectedNotes.map(note => (
-                      <div key={note.id} className="resource-item">
-                        <div className="resource-icon">
-                          <FileText size={18} />
-                        </div>
-                        <div className="resource-info">
-                          <h4>{note.title}</h4>
-                          <p className="resource-meta">
-                            <Tag size={12} />
-                            {note.topic} • Reviewed {note.lastReviewed}
-                          </p>
-                        </div>
-                        <ChevronRight size={18} className="resource-arrow" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="empty-state">
-                <BookOpen size={48} />
-                <h3>Select an assignment</h3>
-                <p>Choose an assignment to view details and related study resources</p>
               </div>
-            )}
+            ))}
           </div>
-        </div>
-      </main>
+
+          <button
+            className="calculator-toggle-btn"
+            onClick={() => setShowGradeCalculator(!showGradeCalculator)}
+          >
+            <Calculator size={18} />
+            <span>Grade Calculator</span>
+          </button>
+        </aside>
+
+        {/* Main Content Area */}
+        <main className="grades-main">
+          {showGradeCalculator ? (
+            <div className="grade-calculator">
+              <div className="calculator-header">
+                <h2>Grade Calculator</h2>
+                <button
+                  className="close-calculator-btn"
+                  onClick={() => setShowGradeCalculator(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="calculator-content">
+                {courseGrades.map(course => {
+                  const required = calculateRequiredGrade(course);
+                  return (
+                    <div key={course.id} className="course-calculator-card">
+                      <div className="course-calculator-header">
+                        <h3>{course.courseName}</h3>
+                        <div className="grade-display">
+                          <div className="current-grade">
+                            <span className="grade-label">Current</span>
+                            <span className="grade-value">{course.currentGrade}%</span>
+                          </div>
+                          <ChevronRight size={20} color="#9ca3af" />
+                          <div className="target-grade">
+                            <span className="grade-label">Target</span>
+                            <span className="grade-value">{course.targetGrade}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="assignments-breakdown">
+                        {course.assignments.map((assignment, idx) => (
+                          <div key={idx} className="breakdown-item">
+                            <div className="breakdown-left">
+                              {assignment.completed ? (
+                                <CheckCircle2 size={16} color="#6B9080" />
+                              ) : (
+                                <Circle size={16} color="#9ca3af" />
+                              )}
+                              <span className="breakdown-name">{assignment.name}</span>
+                            </div>
+                            <div className="breakdown-right">
+                              <span className="breakdown-weight">{assignment.weight}%</span>
+                              {assignment.completed && (
+                                <span className="breakdown-grade">{assignment.grade}%</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {required !== null && (
+                        <div className="required-grade-card">
+                          <TrendingUp size={20} />
+                          <div className="required-info">
+                            <span className="required-label">Required on remaining assignments:</span>
+                            <span className="required-value">{required.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : selectedAssignment ? (
+            <>
+              <div className="assignment-detail-header">
+                <div className="detail-header-left">
+                  <h1>{selectedAssignment.title}</h1>
+                  <p className="detail-course">{selectedAssignment.course}</p>
+                </div>
+                <div className="detail-header-right">
+                  <div className="detail-meta-item">
+                    <Calendar size={16} />
+                    <span>Due: {new Date(selectedAssignment.dueDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                  </div>
+                  <div className="detail-meta-item">
+                    <Target size={16} />
+                    <span>Weight: {selectedAssignment.weight}%</span>
+                  </div>
+                  {selectedAssignment.grade !== undefined && (
+                    <div className="detail-grade-large">{selectedAssignment.grade}%</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="assignment-detail-content">
+                <div className="detail-section">
+                  <div className="section-title">
+                    <Tag size={18} />
+                    <h3>Tags</h3>
+                  </div>
+                  <div className="tags-list">
+                    {selectedAssignment.tags.map((tag, idx) => (
+                      <span key={idx} className="tag-chip">{tag}</span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <div className="section-title">
+                    <BookOpen size={18} />
+                    <h3>Related Notes</h3>
+                  </div>
+                  <div className="related-notes-list">
+                    {relatedNotes[selectedAssignment.id]?.map(note => (
+                      <div key={note.id} className="related-note-card">
+                        <div className="note-card-header">
+                          <FileText size={16} />
+                          <h4>{note.title}</h4>
+                        </div>
+                        <p className="note-preview">{note.preview}</p>
+                        <div className="note-tags">
+                          {note.tags.map((tag, idx) => (
+                            <span key={idx} className="note-tag">{tag}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="detail-section">
+                  <div className="section-title">
+                    <Sparkles size={18} />
+                    <h3>Ask AI Assistant</h3>
+                  </div>
+                  <div className="ai-assistant-box">
+                    <div className="ai-input-container">
+                      <MessageSquare size={18} />
+                      <input
+                        type="text"
+                        className="ai-input"
+                        placeholder="Ask a question about this assignment..."
+                        value={aiQuestion}
+                        onChange={(e) => setAiQuestion(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter' && aiQuestion.trim()) {
+                            console.log('AI Question:', aiQuestion);
+                            setAiQuestion('');
+                          }
+                        }}
+                      />
+                      <button
+                        className="ai-send-btn"
+                        onClick={() => {
+                          if (aiQuestion.trim()) {
+                            console.log('AI Question:', aiQuestion);
+                            setAiQuestion('');
+                          }
+                        }}
+                        disabled={!aiQuestion.trim()}
+                      >
+                        <Send size={16} />
+                      </button>
+                    </div>
+                    <div className="ai-suggestions">
+                      <span className="suggestion-label">Suggestions:</span>
+                      <button className="suggestion-chip">Explain key concepts</button>
+                      <button className="suggestion-chip">Study tips</button>
+                      <button className="suggestion-chip">Common mistakes</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <FileText size={64} className="empty-icon" />
+              <h3>Select an assignment</h3>
+              <p>Choose an assignment to view details, related notes, and use the AI assistant</p>
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 };

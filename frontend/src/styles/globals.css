@@ -300,8 +300,7 @@ body {
   transition: all 0.2s ease;
 }
 
-.note-item:hover {
-}
+.note-item:hover {}
 
 .note-item.completed {
   opacity: 0.5;
@@ -335,31 +334,49 @@ body {
 .assignments-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .assignment-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px;
+  padding: 16px;
   border-radius: 12px;
-  background-color: #FAFAFA;
-  border-left: 3px solid var(--accent-primary);
+  background-color: #FFFFFF;
+  border: 1px solid #E0E0E0;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.assignment-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: var(--accent-primary);
   transition: all 0.2s ease;
 }
 
 .assignment-item:hover {
-  background-color: var(--accent-warm);
-  transform: translateX(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+  border-color: var(--accent-primary);
 }
 
-.assignment-item.priority-high {
-  border-left-color: var(--urgent);
+.assignment-item:hover::before {
+  width: 6px;
+}
+
+.assignment-item.priority-high::before {
+  background-color: var(--accent-secondary);
 }
 
 .assignment-item.urgent {
-  background-color: #FFF4F0;
+  background-color: #FAFAFA;
 }
 
 .assignment-left {
@@ -370,19 +387,21 @@ body {
 }
 
 .urgency-icon {
-  color: var(--urgent);
+  color: var(--accent-primary);
+  flex-shrink: 0;
 }
 
 .assignment-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .assignment-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
+  line-height: 1.3;
 }
 
 .assignment-meta {
@@ -393,19 +412,25 @@ body {
   color: var(--text-secondary);
 }
 
+.assignment-meta svg {
+  flex-shrink: 0;
+}
+
 .assignment-days {
   text-align: center;
-  padding: 8px 12px;
-  background-color: white;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--accent-warm) 0%, var(--accent-secondary) 100%);
   border-radius: 10px;
-  border: 2px solid var(--accent-primary);
+  min-width: 60px;
+  flex-shrink: 0;
 }
 
 .days-number {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
   color: var(--accent-primary);
   line-height: 1;
+  margin-bottom: 2px;
 }
 
 .days-label {
@@ -413,6 +438,7 @@ body {
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Heatmap */
@@ -638,7 +664,7 @@ body {
   .cards-row {
     grid-template-columns: 1fr 1fr;
   }
-  
+
   .assignments-card {
     grid-column: 1 / -1;
   }

@@ -1,7 +1,8 @@
 .calendar-container {
   display: flex;
   height: 100vh;
-  background-color: #E7EAD7;
+    background-color: var(--bg-primary);
+
   overflow: hidden;
 }
 

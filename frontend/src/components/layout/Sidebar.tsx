@@ -62,7 +62,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
 
       <div className="nav-bottom">
         <button
-          className="nav-item"
+          className={`nav-item ${activeTab === 'help' ? 'active' : ''}`}
+          onClick={() => setActiveTab('help')}
           title="Help"
         >
           <HelpCircle size={24} />

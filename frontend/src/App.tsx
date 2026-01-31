@@ -4,6 +4,7 @@ import Notes from './pages/Notes';
 import Grades from './pages/Grades';
 import Calendar from './pages/Calendar';
 import ToDo from './pages/ToDo';
+import GetHelp from './pages/GetHelp';
 import './styles/globals.css';
 
 function App() {
@@ -23,6 +24,8 @@ function App() {
       case 'files':
       case 'todo':
         return <ToDo onNavigate={setCurrentPage} />;
+      case 'help':
+        return <GetHelp onNavigate={setCurrentPage} />;
       default:
         return <Dashboard onNavigate={setCurrentPage} />;
     }
