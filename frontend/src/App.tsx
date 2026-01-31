@@ -11,13 +11,16 @@ import GetHelp from './pages/GetHelp';
 import ProfessorDashboard from './pages/Professordashboard';
 import './styles/globals.css';
 
-export type NavigateOptions = { openNoteId?: string };
+export type NavigateOptions = { openNoteId?: string }; 
 
 // Main App Component (wrapped with auth)
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
   const { isAuthenticated, isLoading, account, getAccessToken } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
+
+  // Render appropriate page  
+  const [notesOpenNoteId, setNotesOpenNoteId] = useState<string | null>(null); 
   
   // Check if user is professor/admin (you can customize this logic)
   const isProfessor = true; // Set to true for demo, or check account.jobTitle, account.roles, etc.
@@ -28,10 +31,12 @@ function AppContent() {
       if (isAuthenticated) {
         const token = await getAccessToken();
         setAccessToken(token);
+      } else {
+        setAccessToken(null);
       }
     };
     fetchToken();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, getAccessToken]);
 
   // Initialize Graph Service
   const graphService = useGraphService(accessToken);
@@ -69,7 +74,13 @@ function AppContent() {
     return <Login />;
   }
 
-  // Render appropriate page  const [notesOpenNoteId, setNotesOpenNoteId] = useState<string | null>(null);
+  if (isAuthenticated && !accessToken) {
+    return (
+      <div style={{ padding: 24 }}>
+        Loading Microsoft access…
+      </div>
+    );
+  }
 
   const handleNavigate = (page: string, options?: NavigateOptions) => {
     setCurrentPage(page);
@@ -82,7 +93,7 @@ function AppContent() {
 
   const renderPage = () => {
     const pageProps = {
-      onNavigate: setCurrentPage,
+      onNavigate: (p: any) => setCurrentPage(p),
       graphService,
       userProfile: account,
     };
@@ -98,11 +109,11 @@ function AppContent() {
             onInitialOpenNoteHandled={() => setNotesOpenNoteId(null)}
           />
         );
-        return <Notes {...pageProps} />;
+        // return <Notes {...pageProps} />;
       case 'grades':
       case 'analytics':
         return <Grades onNavigate={handleNavigate} />;
-        return <Grades {...pageProps} />;
+        // return <Grades {...pageProps} />;
       case 'calendar':
         return <Calendar {...pageProps} />;
       case 'files':

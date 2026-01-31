@@ -32,7 +32,29 @@ export class GraphService {
       throw new Error(`Graph API error: ${response.status} ${response.statusText}`);
     }
 
+    // DELETE responses have no body
+    if (method === 'DELETE') return undefined;
+
     return response.json();
+  }
+
+  // Paginated fetcher: follows @odata.nextLink until all pages are collected.
+  // Graph API returns at most 10 events per page by default, so without this
+  // you would silently lose events beyond the first page.
+  private async callGraphAPIPaginated(endpoint: string): Promise<Record<string, unknown>[]> {
+    let url: string | null = endpoint;
+    const results: Record<string, unknown>[] = [];
+
+    while (url) {
+      const page = await this.callGraphAPI(url);
+      if (Array.isArray(page.value)) {
+        results.push(...page.value);
+      }
+      // Graph sends the next page URL here; undefined when there are no more pages.
+      url = (page['@odata.nextLink'] as string) ?? null;
+    }
+
+    return results;
   }
 
   // USER PROFILE
@@ -86,16 +108,20 @@ export class GraphService {
 
   // OUTLOOK CALENDAR
 
-  // Get calendar events
-  async getCalendarEvents(startDate?: string, endDate?: string) {
+  // Get calendar events for a date range.
+  // Uses $orderby so results come back chronologically, and paginates
+  // automatically so no events are dropped.
+  async getCalendarEvents(startDate?: string, endDate?: string): Promise<Record<string, unknown>[]> {
     let endpoint = graphConfig.graphCalendarEndpoint;
     
     if (startDate && endDate) {
-      endpoint += `?$filter=start/dateTime ge '${startDate}' and end/dateTime le '${endDate}'`;
+      // Use 'lt' (less-than) on end so that events finishing exactly at the
+      // boundary are still included; the previous 'le' (less-or-equal) on
+      // end/dateTime would exclude an event whose start equals that value.
+      endpoint += `?$filter=start/dateTime ge '${startDate}' and end/dateTime lt '${endDate}'&$orderby=start/dateTime asc`;
     }
-    
-    const response = await this.callGraphAPI(endpoint);
-    return response.value;
+
+    return this.callGraphAPIPaginated(endpoint);
   }
 
   // Create a calendar event
