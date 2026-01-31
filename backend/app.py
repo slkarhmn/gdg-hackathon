@@ -46,6 +46,7 @@ class User(db.Model):
     study_plan = db.relationship('StudyPlan', backref='user', uselist=False, cascade='all, delete-orphan')
     spaced_repetitions = db.relationship('SpacedRepetition', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     assignments = db.relationship('Assignment', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+    tags = db.relationship('Tag', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     
     def to_dict(self):
         return {
@@ -134,13 +135,14 @@ class Assignment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    canvas_id = db.Column(db.Integer, index=True)
 
     name = db.Column(db.String(255), nullable=False)
     due_date = db.Column(db.DateTime, nullable=False, index=True)
 
     tags = db.Column(db.Text)
 
-    grade = db.Column(db.Float)  # Can be null until graded
+    grade = db.Column(db.Float)
     weight = db.Column(db.Float, nullable=False, default=0)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -149,6 +151,7 @@ class Assignment(db.Model):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "canvas_id": self.canvas_id,
             "name": self.name,
             "due_date": self.due_date.isoformat() if self.due_date else None,
             "tags": json.loads(self.tags) if self.tags else [],
@@ -157,6 +160,32 @@ class Assignment(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
+
+class Tag(db.Model):
+    """Tags table - tracks all valid tags created from assignments"""
+    __tablename__ = 'tags'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    source_assignment_id = db.Column(db.Integer, db.ForeignKey('assignments.id'), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Unique constraint: each user can only have one tag with a given name
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'name', name='unique_user_tag'),
+    )
+
+    source_assignment = db.relationship('Assignment', backref='tag_entries')
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "source_assignment_id": self.source_assignment_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
 
 
 # =============================================================================
@@ -169,12 +198,14 @@ ns_notes = Namespace('notes', description='Note operations')
 ns_study_plans = Namespace('study-plans', description='Study plan operations')
 ns_spaced_reps = Namespace('spaced-repetitions', description='Spaced repetition operations')
 ns_assignments = Namespace('assignments', description='Assignment operations')
+ns_tags = Namespace('tags', description='Tag operations')
 
 api.add_namespace(ns_users, path='/api/users')
 api.add_namespace(ns_notes, path='/api/notes')
 api.add_namespace(ns_study_plans, path='/api/study-plans')
 api.add_namespace(ns_spaced_reps, path='/api/spaced-repetitions')
 api.add_namespace(ns_assignments, path='/api/assignments')
+api.add_namespace(ns_tags, path='/api/tags')
 
 # User models
 user_input = api.model('UserInput', {
@@ -260,6 +291,20 @@ spaced_rep_output = api.model('SpacedRepetition', {
     'repetition_dates': fields.List(fields.String, description='Review dates'),
     'revision_count': fields.Integer(description='Number of revisions'),
     'next_review_date': fields.String(description='Next review date'),
+    'created_at': fields.String(description='Creation timestamp')
+})
+
+# Tag models
+tag_input = api.model('TagInput', {
+    'name': fields.String(required=True, description='Tag name'),
+    'source_assignment_id': fields.Integer(description='Assignment ID that created this tag')
+})
+
+tag_output = api.model('Tag', {
+    'id': fields.Integer(description='Tag ID'),
+    'user_id': fields.Integer(description='User ID'),
+    'name': fields.String(description='Tag name'),
+    'source_assignment_id': fields.Integer(description='Source assignment ID'),
     'created_at': fields.String(description='Creation timestamp')
 })
 
@@ -352,18 +397,29 @@ class UserNoteList(Resource):
     @ns_users.expect(note_input)
     @ns_users.marshal_with(note_output, code=201)
     def post(self, user_id):
-        """Create a new note for a user"""
+        """Create a new note for a user. Tags must exist from assignments."""
         user = User.query.get_or_404(user_id)
         data = request.json
         
         if not data or 'content' not in data:
             api.abort(400, 'content is required')
         
+        # Validate tags - only allow tags that exist from assignments
+        requested_tags = data.get('tags', [])
+        if requested_tags:
+            valid_tags, invalid_tags = validate_note_tags(user_id, requested_tags)
+            if invalid_tags:
+                valid_tag_names = get_valid_tags_for_user(user_id)
+                api.abort(400, f'Invalid tags: {invalid_tags}. Tags must be created from assignments first. Valid tags: {valid_tag_names}')
+            tags_to_save = valid_tags
+        else:
+            tags_to_save = []
+        
         note = Note(
             user_id=user_id,
             content=json.dumps(data['content']),
             subject=data.get('subject', ''),
-            tags=json.dumps(data.get('tags', []))
+            tags=json.dumps(tags_to_save)
         )
         
         db.session.add(note)
@@ -390,7 +446,7 @@ class NoteResource(Resource):
     @ns_notes.expect(note_input)
     @ns_notes.marshal_with(note_output)
     def put(self, note_id):
-        """Update a note"""
+        """Update a note. Tags must exist from assignments."""
         note = Note.query.get_or_404(note_id)
         data = request.json
         
@@ -399,7 +455,16 @@ class NoteResource(Resource):
         if 'subject' in data:
             note.subject = data['subject']
         if 'tags' in data:
-            note.tags = json.dumps(data['tags'])
+            # Validate tags - only allow tags that exist from assignments
+            requested_tags = data['tags']
+            if requested_tags:
+                valid_tags, invalid_tags = validate_note_tags(note.user_id, requested_tags)
+                if invalid_tags:
+                    valid_tag_names = get_valid_tags_for_user(note.user_id)
+                    api.abort(400, f'Invalid tags: {invalid_tags}. Tags must be created from assignments first. Valid tags: {valid_tag_names}')
+                note.tags = json.dumps(valid_tags)
+            else:
+                note.tags = json.dumps([])
         
         note.updated_at = datetime.utcnow()
         db.session.commit()
@@ -614,7 +679,7 @@ class AssignmentList(Resource):
     @ns_assignments.expect(assignment_input)
     @ns_assignments.marshal_with(assignment_output, code=201)
     def post(self, user_id):
-        """Create a new assignment"""
+        """Create a new assignment. Tags provided will be automatically registered in the tags table."""
 
         User.query.get_or_404(user_id)
         data = request.json
@@ -622,16 +687,23 @@ class AssignmentList(Resource):
         if not data or 'name' not in data or 'due_date' not in data:
             api.abort(400, 'name and due_date are required')
 
+        tag_list = data.get('tags', [])
+
         assignment = Assignment(
             user_id=user_id,
             name=data['name'],
             due_date=datetime.fromisoformat(data['due_date'].replace("Z", "+00:00")),
-            tags=json.dumps(data.get('tags', [])),
+            tags=json.dumps(tag_list),
             grade=data.get("grade"),
             weight=data.get("weight", 0)
         )
 
         db.session.add(assignment)
+        db.session.flush()  # Get the assignment ID before committing
+
+        # Sync tags from this assignment
+        sync_tags_from_assignment(user_id, assignment.id, tag_list)
+
         db.session.commit()
 
         return assignment.to_dict(), 201
@@ -645,7 +717,7 @@ class AssignmentResource(Resource):
     @ns_assignments.expect(assignment_input)
     @ns_assignments.marshal_with(assignment_output)
     def put(self, assignment_id):
-        """Update an assignment"""
+        """Update an assignment. New tags will be automatically registered."""
         assignment = Assignment.query.get_or_404(assignment_id)
         data = request.json
         
@@ -654,11 +726,14 @@ class AssignmentResource(Resource):
         if 'due_date' in data:
             assignment.due_date = datetime.fromisoformat(data['due_date'].replace('Z', '+00:00'))
         if 'tags' in data:
-            assignment.tags = json.dumps(data['tags'])
-        if 'description' in data:
-            assignment.description = data['description']
-        if 'status' in data:
-            assignment.status = data['status']
+            tag_list = data['tags']
+            assignment.tags = json.dumps(tag_list)
+            # Sync any new tags from this assignment
+            sync_tags_from_assignment(assignment.user_id, assignment.id, tag_list)
+        if 'grade' in data:
+            assignment.grade = data['grade']
+        if 'weight' in data:
+            assignment.weight = data['weight']
         
         db.session.commit()
         
@@ -711,8 +786,185 @@ class WeightedGrade(Resource):
 
 
 # =============================================================================
+# API ENDPOINTS - TAGS
+# =============================================================================
+
+@ns_tags.route('/user/<int:user_id>')
+@ns_tags.param('user_id', 'The user identifier')
+class TagList(Resource):
+    @ns_tags.doc('get_tags')
+    @ns_tags.marshal_list_with(tag_output)
+    def get(self, user_id):
+        """Get all tags for a user (tags created from assignments)"""
+        User.query.get_or_404(user_id)
+        tags = Tag.query.filter_by(user_id=user_id).order_by(Tag.name).all()
+        return [tag.to_dict() for tag in tags]
+    
+    @ns_tags.doc('create_tag')
+    @ns_tags.expect(tag_input)
+    @ns_tags.marshal_with(tag_output, code=201)
+    def post(self, user_id):
+        """
+        Manually create a tag for a user.
+        Note: Tags are typically created automatically when assignments are created.
+        This endpoint allows manual tag creation if needed.
+        """
+        User.query.get_or_404(user_id)
+        data = request.json
+        
+        if not data or 'name' not in data:
+            api.abort(400, 'name is required')
+        
+        tag_name = data['name'].strip()
+        if not tag_name:
+            api.abort(400, 'Tag name cannot be empty')
+        
+        # Check if tag already exists
+        existing_tag = Tag.query.filter_by(user_id=user_id, name=tag_name).first()
+        if existing_tag:
+            api.abort(409, f'Tag "{tag_name}" already exists')
+        
+        tag = Tag(
+            user_id=user_id,
+            name=tag_name,
+            source_assignment_id=data.get('source_assignment_id')
+        )
+        
+        db.session.add(tag)
+        db.session.commit()
+        
+        return tag.to_dict(), 201
+
+
+@ns_tags.route('/<int:tag_id>')
+@ns_tags.param('tag_id', 'The tag identifier')
+class TagResource(Resource):
+    @ns_tags.doc('get_tag')
+    @ns_tags.marshal_with(tag_output)
+    def get(self, tag_id):
+        """Get a specific tag"""
+        tag = Tag.query.get_or_404(tag_id)
+        return tag.to_dict()
+    
+    @ns_tags.doc('delete_tag')
+    @ns_tags.response(200, 'Tag deleted')
+    def delete(self, tag_id):
+        """
+        Delete a tag.
+        Warning: This will make the tag invalid for notes.
+        Notes with this tag will keep the tag, but it won't be valid for new notes.
+        """
+        tag = Tag.query.get_or_404(tag_id)
+        db.session.delete(tag)
+        db.session.commit()
+        
+        return {'message': 'Tag deleted successfully'}, 200
+
+
+@ns_tags.route('/user/<int:user_id>/names')
+@ns_tags.param('user_id', 'The user identifier')
+class TagNameList(Resource):
+    @ns_tags.doc('get_tag_names')
+    def get(self, user_id):
+        """Get just the tag names for a user (useful for autocomplete)"""
+        User.query.get_or_404(user_id)
+        tags = Tag.query.filter_by(user_id=user_id).order_by(Tag.name).all()
+        return {
+            'user_id': user_id,
+            'tags': [tag.name for tag in tags],
+            'count': len(tags)
+        }
+
+
+@ns_tags.route('/user/<int:user_id>/sync')
+@ns_tags.param('user_id', 'The user identifier')
+class SyncTags(Resource):
+    @ns_tags.doc('sync_tags')
+    def post(self, user_id):
+        """
+        Sync all tags from existing assignments.
+        This is useful if assignments were created before the tag system was in place.
+        """
+        User.query.get_or_404(user_id)
+        
+        # Get all assignments for this user
+        assignments = Assignment.query.filter_by(user_id=user_id).all()
+        
+        created_tags = []
+        for assignment in assignments:
+            tag_list = json.loads(assignment.tags) if assignment.tags else []
+            new_tags = sync_tags_from_assignment(user_id, assignment.id, tag_list)
+            created_tags.extend(new_tags)
+        
+        db.session.commit()
+        
+        # Get all tags after sync
+        all_tags = Tag.query.filter_by(user_id=user_id).order_by(Tag.name).all()
+        
+        return {
+            'message': 'Tags synced successfully',
+            'new_tags_created': created_tags,
+            'total_tags': len(all_tags),
+            'all_tags': [tag.name for tag in all_tags]
+        }
+
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
+def sync_tags_from_assignment(user_id, assignment_id, tag_names):
+    """
+    Create tags from an assignment's tag list.
+    Tags are only created if they don't already exist for the user.
+    """
+    created_tags = []
+    for tag_name in tag_names:
+        tag_name = tag_name.strip()
+        if not tag_name:
+            continue
+        
+        # Check if tag already exists for this user
+        existing_tag = Tag.query.filter_by(user_id=user_id, name=tag_name).first()
+        if not existing_tag:
+            new_tag = Tag(
+                user_id=user_id,
+                name=tag_name,
+                source_assignment_id=assignment_id
+            )
+            db.session.add(new_tag)
+            created_tags.append(tag_name)
+    
+    return created_tags
+
+
+def validate_note_tags(user_id, tag_names):
+    """
+    Validate that all tags exist for this user (were created from assignments).
+    Returns a tuple of (valid_tags, invalid_tags).
+    """
+    valid_tags = []
+    invalid_tags = []
+    
+    for tag_name in tag_names:
+        tag_name = tag_name.strip()
+        if not tag_name:
+            continue
+        
+        existing_tag = Tag.query.filter_by(user_id=user_id, name=tag_name).first()
+        if existing_tag:
+            valid_tags.append(tag_name)
+        else:
+            invalid_tags.append(tag_name)
+    
+    return valid_tags, invalid_tags
+
+
+def get_valid_tags_for_user(user_id):
+    """Get all valid tag names for a user."""
+    tags = Tag.query.filter_by(user_id=user_id).all()
+    return [tag.name for tag in tags]
+
 
 def generate_monthly_plan_logic(start_date, notes, assignments):
     """Generate a monthly study plan that prioritizes notes with tags matching assignments"""

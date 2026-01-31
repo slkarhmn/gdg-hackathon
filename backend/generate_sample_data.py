@@ -1,16 +1,17 @@
 """
-Sample Data Generator for Study App (Updated)
+Sample Data Generator for Study App (Updated with Tags)
 
 Generates realistic test data for development and testing.
 
-Compatible with the NEW clean replacement API:
+Compatible with the API including the Tags system:
 
 ✔ Users
-✔ Notes
-✔ Assignments (with grade + weight)
+✔ Assignments (creates tags automatically)
+✔ Tags (synced from assignments)
+✔ Notes (uses valid tags from assignments)
 
-Spaced repetition + study plan endpoints are NOT included
-in the current backend version, so they are skipped.
+IMPORTANT: Assignments must be created FIRST because notes can only
+use tags that have been registered from assignments.
 """
 
 import requests
@@ -75,6 +76,9 @@ def create_sample_users(count=3):
             user = response.json()
             users.append(user)
             print(f"✓ Created user: {user['email']}")
+        elif response.status_code == 409:
+            # User already exists, try to get them
+            print(f"  ⚠ User {user_data['email']} already exists, skipping...")
         else:
             print(f"✗ Failed to create user: {response.text}")
 
@@ -82,20 +86,167 @@ def create_sample_users(count=3):
 
 
 # =============================================================================
-# NOTE GENERATION
+# ASSIGNMENT GENERATION (CREATES TAGS AUTOMATICALLY)
+# =============================================================================
+
+def create_sample_assignments(user_id, count=8):
+    """
+    Create assignments using the API.
+    
+    IMPORTANT: This creates tags automatically. Tags from assignments
+    become available for use in notes.
+
+    Fields:
+    ✔ name
+    ✔ due_date
+    ✔ tags (auto-registered in Tags table)
+    ✔ grade
+    ✔ weight
+    """
+
+    assignments = []
+
+    assignment_templates = [
+        ("Final Exam", 45, 40, True),      # (name, days_ahead, weight, has_grade)
+        ("Midterm Project", 30, 25, True),
+        ("Lab Assignment 1", 14, 10, True),
+        ("Lab Assignment 2", 21, 10, False),
+        ("Research Paper", 28, 15, False),
+        ("Quiz 1", 7, 5, True),
+        ("Quiz 2", 10, 5, False),
+        ("Homework", 5, 10, False),
+    ]
+
+    for i in range(min(count, len(assignment_templates))):
+        template_name, days_ahead, weight, has_grade = assignment_templates[i]
+
+        subject = SUBJECTS[i % len(SUBJECTS)]
+        subject_tags = TAGS[subject]
+
+        # Select tags for this assignment
+        selected_tags = random.sample(subject_tags, min(3, len(subject_tags)))
+
+        assignment_data = {
+            "name": f"{subject} - {template_name}",
+            "due_date": (datetime.now() + timedelta(days=days_ahead)).isoformat(),
+            "tags": selected_tags,
+            "weight": weight,
+        }
+        
+        # Only add grade if assignment is "graded"
+        if has_grade:
+            assignment_data["grade"] = random.randint(70, 100)
+
+        response = requests.post(
+            f"{BASE_URL}/assignments/user/{user_id}",
+            json=assignment_data,
+        )
+
+        if response.status_code == 201:
+            assignment = response.json()
+            assignments.append(assignment)
+            grade_str = f", grade={assignment_data.get('grade', 'N/A')}" if has_grade else ""
+            print(f"  ✓ Created assignment: {assignment['name']} (weight={weight}%{grade_str})")
+            print(f"    Tags registered: {selected_tags}")
+        else:
+            print(f"  ✗ Failed to create assignment: {response.text}")
+
+    return assignments
+
+
+# =============================================================================
+# TAG OPERATIONS
+# =============================================================================
+
+def get_available_tags(user_id):
+    """Get all available tags for a user (created from assignments)"""
+    
+    response = requests.get(f"{BASE_URL}/tags/user/{user_id}/names")
+    
+    if response.status_code == 200:
+        result = response.json()
+        return result.get('tags', [])
+    else:
+        print(f"  ✗ Failed to get tags: {response.text}")
+        return []
+
+
+def sync_tags_from_assignments(user_id):
+    """Sync tags from existing assignments (useful for retroactive tag creation)"""
+    
+    response = requests.post(f"{BASE_URL}/tags/user/{user_id}/sync")
+    
+    if response.status_code == 200:
+        result = response.json()
+        print(f"  ✓ Tags synced: {result['total_tags']} total tags")
+        if result['new_tags_created']:
+            print(f"    New tags created: {result['new_tags_created']}")
+        return result['all_tags']
+    else:
+        print(f"  ✗ Failed to sync tags: {response.text}")
+        return []
+
+
+def show_available_tags(user_id):
+    """Display all available tags for a user"""
+    
+    response = requests.get(f"{BASE_URL}/tags/user/{user_id}")
+    
+    if response.status_code == 200:
+        tags = response.json()
+        print(f"  📏 Available tags ({len(tags)} total):")
+        for tag in tags:
+            source = f" (from assignment #{tag['source_assignment_id']})" if tag['source_assignment_id'] else ""
+            print(f"    - {tag['name']}{source}")
+        return tags
+    else:
+        print(f"  ✗ Failed to get tags: {response.text}")
+        return []
+
+
+# =============================================================================
+# NOTE GENERATION (USES VALID TAGS FROM ASSIGNMENTS)
 # =============================================================================
 
 def create_sample_notes(user_id, count=10):
-    """Create sample notes for a user"""
+    """
+    Create sample notes for a user.
+    
+    IMPORTANT: Notes can only use tags that exist from assignments.
+    This function first fetches available tags, then creates notes
+    using only those valid tags.
+    """
+    
+    # Get available tags for this user
+    available_tags = get_available_tags(user_id)
+    
+    if not available_tags:
+        print("  ⚠ No tags available. Create assignments first!")
+        return []
+    
+    print(f"  📏 Using {len(available_tags)} available tags: {available_tags[:5]}{'...' if len(available_tags) > 5 else ''}")
+    
     notes = []
 
     for i in range(count):
         subject = random.choice(SUBJECTS)
-        subject_tags = TAGS[subject]
-
-        selected_tags = random.sample(subject_tags, min(3, len(subject_tags)))
+        
+        # Select only from available tags (that exist from assignments)
+        # Try to pick tags that might relate to the subject
+        subject_related_tags = [t for t in available_tags if any(
+            t.lower() in tag.lower() or tag.lower() in t.lower() 
+            for tag in TAGS.get(subject, [])
+        )]
+        
+        # If no related tags found, use random available tags
+        if not subject_related_tags:
+            subject_related_tags = available_tags
+        
+        # Select 1-3 tags from available tags
+        num_tags = min(random.randint(1, 3), len(subject_related_tags))
+        selected_tags = random.sample(subject_related_tags, num_tags)
+        
         concepts = ", ".join(selected_tags)
-
         content_text = random.choice(NOTE_TEMPLATES).format(concepts=concepts)
 
         note_data = {
@@ -116,66 +267,11 @@ def create_sample_notes(user_id, count=10):
         if response.status_code == 201:
             note = response.json()
             notes.append(note)
-            print(f"  ✓ Created note: {note['subject']}")
+            print(f"  ✓ Created note: {note['subject']} (tags: {selected_tags})")
         else:
             print(f"  ✗ Failed to create note: {response.text}")
 
     return notes
-
-
-# =============================================================================
-# ASSIGNMENT GENERATION (UPDATED FORMAT)
-# =============================================================================
-
-def create_sample_assignments(user_id, count=5):
-    """
-    Create assignments using NEW clean replacement format:
-
-    ✔ name
-    ✔ due_date
-    ✔ tags
-    ✔ grade
-    ✔ weight
-    """
-
-    assignments = []
-
-    assignment_templates = [
-        ("Final Exam", 45, 40),
-        ("Midterm Project", 30, 25),
-        ("Lab Assignment", 14, 15),
-        ("Research Paper", 21, 20),
-        ("Quiz", 7, 10),
-    ]
-
-    for i in range(min(count, len(assignment_templates))):
-        template_name, days_ahead, weight = assignment_templates[i]
-
-        subject = random.choice(SUBJECTS)
-        subject_tags = TAGS[subject]
-
-        assignment_data = {
-            "name": f"{subject} - {template_name}",
-            "due_date": (datetime.now() + timedelta(days=days_ahead)).isoformat(),
-            "tags": random.sample(subject_tags, min(3, len(subject_tags))),
-            "grade": random.randint(60, 100),
-            "weight": weight,
-        }
-
-        # ✅ Correct NEW endpoint
-        response = requests.post(
-            f"{BASE_URL}/assignments/user/{user_id}",
-            json=assignment_data,
-        )
-
-        if response.status_code == 201:
-            assignment = response.json()
-            assignments.append(assignment)
-            print(f"  ✓ Created assignment: {assignment['name']} (weight={weight}%)")
-        else:
-            print(f"  ✗ Failed to create assignment: {response.text}")
-
-    return assignments
 
 
 # =============================================================================
@@ -191,7 +287,10 @@ def check_weighted_grade(user_id):
 
     if response.status_code == 200:
         result = response.json()
-        print(f"  📊 Weighted Grade: {result['weighted_grade']}")
+        if result['weighted_grade'] is not None:
+            print(f"  📊 Weighted Grade: {result['weighted_grade']}%")
+        else:
+            print(f"  📊 Weighted Grade: No graded assignments yet")
     else:
         print(f"  ✗ Failed weighted grade check: {response.text}")
 
@@ -201,10 +300,17 @@ def check_weighted_grade(user_id):
 # =============================================================================
 
 def generate_all_sample_data():
-    """Generate full sample dataset"""
+    """
+    Generate full sample dataset.
+    
+    ORDER MATTERS:
+    1. Create users
+    2. Create assignments (this registers tags)
+    3. Create notes (using valid tags from assignments)
+    """
 
     print("=" * 60)
-    print("Study App Sample Data Generator (Updated)")
+    print("Study App Sample Data Generator (with Tags System)")
     print("=" * 60)
 
     print("\n📝 Creating users...")
@@ -217,13 +323,20 @@ def generate_all_sample_data():
     for user in users:
         print(f"\n👤 Setting up data for {user['display_name']}...")
 
-        print("  📚 Creating notes...")
+        # STEP 1: Create assignments FIRST (this registers tags)
+        print("  📋 Creating assignments (this registers tags)...")
+        create_sample_assignments(user["id"], count=8)
+
+        # STEP 2: Show available tags
+        print("\n  🏷️  Checking available tags...")
+        show_available_tags(user["id"])
+
+        # STEP 3: Create notes using valid tags
+        print("\n  📚 Creating notes (using valid tags)...")
         create_sample_notes(user["id"], count=10)
 
-        print("  📋 Creating assignments...")
-        create_sample_assignments(user["id"], count=5)
-
-        print("  📊 Checking weighted grade...")
+        # STEP 4: Check weighted grade
+        print("\n  📊 Checking weighted grade...")
         check_weighted_grade(user["id"])
 
     print("\n" + "=" * 60)
@@ -231,16 +344,52 @@ def generate_all_sample_data():
     print("=" * 60)
 
 
+def generate_for_existing_user(user_id):
+    """Generate sample data for an existing user"""
+    
+    print(f"\n👤 Generating data for user ID: {user_id}")
+    
+    # Sync any existing tags first
+    print("  🔄 Syncing existing tags...")
+    sync_tags_from_assignments(user_id)
+    
+    # Create new assignments
+    print("\n  📋 Creating assignments...")
+    create_sample_assignments(user_id, count=5)
+    
+    # Show tags
+    print("\n  🏷️  Available tags:")
+    show_available_tags(user_id)
+    
+    # Create notes
+    print("\n  📚 Creating notes...")
+    create_sample_notes(user_id, count=8)
+    
+    # Check grade
+    print("\n  📊 Weighted grade:")
+    check_weighted_grade(user_id)
+
+
 # =============================================================================
 # RUN SCRIPT
 # =============================================================================
 
 if __name__ == "__main__":
+    import sys
+    
     try:
         response = requests.get(f"{BASE_URL}/health")
 
         if response.status_code == 200:
-            generate_all_sample_data()
+            # Check if user ID was passed as argument
+            if len(sys.argv) > 1:
+                try:
+                    user_id = int(sys.argv[1])
+                    generate_for_existing_user(user_id)
+                except ValueError:
+                    print(f"Invalid user ID: {sys.argv[1]}")
+            else:
+                generate_all_sample_data()
         else:
             print("❌ API is not responding correctly.")
     except requests.exceptions.ConnectionError:
