@@ -4,9 +4,10 @@ import {
   X, 
   Sparkles, 
   Brain, 
-  Calendar, 
+  // ✅ FIXED: Removed unused imports
+  // Calendar, 
   BookOpen, 
-  MessageSquare,
+  // MessageSquare,
   Users,
   GraduationCap,
   Zap,
@@ -25,7 +26,8 @@ interface PricingProps {
 const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
-  const handleGetStarted = (plan: string) => {
+  // ✅ FIXED: Removed unused variable 'plan' - using underscore to indicate intentionally unused
+  const handleGetStarted = (_plan: string) => {
     if (onSignIn) {
       onSignIn();
     } else {
@@ -33,12 +35,13 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
     }
   };
 
-  const handleBackClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (onNavigate) {
-      onNavigate('dashboard');
-    }
-  };
+  // ✅ FIXED: Removed unused function handleBackClick
+  // const handleBackClick = (e: React.MouseEvent) => {
+  //   e.preventDefault();
+  //   if (onNavigate) {
+  //     onNavigate('dashboard');
+  //   }
+  // };
 
   const plans = [
     {
@@ -119,7 +122,7 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
       <div className="pricing-header">
         <div className="pricing-header-content">
           <a href="/" className="back-link">
-             Back to Home
+             Back to Home
           </a>
           <div className="header-badge">
             <Sparkles size={16} />
@@ -191,7 +194,8 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
                     </span>
                   </>
                 )}
-                {billingCycle === 'annual' && !plan.enterprise && plan.price.monthly > 0 && (
+                {/* ✅ FIXED: Convert to number before comparison */}
+                {billingCycle === 'annual' && !plan.enterprise && Number(plan.price.monthly) > 0 && (
                   <div className="price-annual">
                     Billed ${plan.price.annual} annually
                   </div>

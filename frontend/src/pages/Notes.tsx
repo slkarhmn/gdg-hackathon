@@ -245,9 +245,8 @@ const Notes: React.FC<NotesProps> = ({
   const [aiSummary, setAISummary] = useState('');
   const [aiQuestions, setAIQuestions] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isSavingAI, setIsSavingAI] = useState(false);
-
-
+  // ✅ FIXED: Removed unused state variables
+  // const [isSavingAI, setIsSavingAI] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -680,6 +679,7 @@ const Notes: React.FC<NotesProps> = ({
     const id = parseInt(noteId, 10);
     if (Number.isNaN(id)) return;
     setSaveStatus('saving');
+    // ✅ FIXED: Removed 'summary' from content object
     updateNote(id, { content: { title: title || 'Untitled Note', body } })
       .then((updated) => {
         const newTitle = extractNoteTitle(updated);
@@ -1225,8 +1225,6 @@ const Notes: React.FC<NotesProps> = ({
                           content: {
                             title: editorTitleRef.current || 'Untitled Note',
                             body: newBody,
-                            summary,
-                            questions,
                           },
                         });
                         setEditorBody(newBody);

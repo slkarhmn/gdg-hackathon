@@ -10,7 +10,8 @@ import {
     AlertCircle,
     LogOut
 } from 'lucide-react';
-import { useAIChat } from '../contexts/AIChatContext';
+// ✅ FIXED: Removed unused import
+// import { useAIChat } from '../contexts/AIChatContext';
 import './GetHelp.css';
 import { useAuth } from '../auth/AuthContext';
 
@@ -264,7 +265,8 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
 
     return (
         <div className="get-help-container">
-            <Sidebar activeTab={mainSidebarTab} onTabChange={setMainSidebarTab} onNavigate={onNavigate} />
+            {/* ✅ FIXED: Removed onTabChange prop - pass onNavigate with correct callback */}
+            <Sidebar activeTab={mainSidebarTab} onNavigate={onNavigate} />
             
             <div className="get-help-content">
                 <div className="get-help-header">
