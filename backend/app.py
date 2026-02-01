@@ -8,6 +8,26 @@ import json
 import os
 import uuid
 import mimetypes
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Import AI chat functionality
+from ai_chat import (
+    initialize_openai,
+    chat_with_ai,
+    end_conversation_session,
+    load_context,
+    clear_context,
+    get_context_stats
+)
+
+# Initialize OpenAI on startup
+try:
+    initialize_openai()
+except Exception as e:
+    print(f"Warning: Could not initialize OpenAI: {e}")
 
 app = Flask(__name__)
 CORS(app)
@@ -328,6 +348,7 @@ ns_assignments = Namespace('assignments', description='Assignment operations')
 ns_tags = Namespace('tags', description='Tag operations')
 ns_resources = Namespace('resources', description='Resource/lecture material operations')
 ns_courses = Namespace('courses', description='Course operations')
+ns_chat = Namespace('chat', description='AI Chat operations with context management')
 
 api.add_namespace(ns_users, path='/api/users')
 api.add_namespace(ns_notes, path='/api/notes')
@@ -337,6 +358,8 @@ api.add_namespace(ns_assignments, path='/api/assignments')
 api.add_namespace(ns_tags, path='/api/tags')
 api.add_namespace(ns_resources, path='/api/resources')
 api.add_namespace(ns_courses, path='/api/courses')
+api.add_namespace(ns_chat, path='/api/chat')
+
 
 # User models
 user_input = api.model('UserInput', {
@@ -489,6 +512,39 @@ course_output = api.model('Course', {
     'resource_count': fields.Integer(description='Number of resources in the course'),
     'created_at': fields.String(description='Creation timestamp'),
     'updated_at': fields.String(description='Update timestamp')
+})
+
+# Chat models
+chat_message_input = api.model('ChatMessageInput', {
+    'message': fields.String(required=True, description='User message to send to AI'),
+    'conversation_history': fields.Raw(description='Optional conversation history from current session')
+})
+
+chat_response_output = api.model('ChatResponse', {
+    'response': fields.String(description='AI assistant response'),
+    'conversation_history': fields.Raw(description='Updated conversation history'),
+    'tokens_used': fields.Integer(description='Number of tokens used in this request'),
+    'timestamp': fields.String(description='Response timestamp')
+})
+
+chat_session_end_input = api.model('ChatSessionEndInput', {
+    'conversation_history': fields.Raw(required=True, description='Full conversation history to summarize')
+})
+
+context_output = api.model('Context', {
+    'user_id': fields.Integer(description='User ID'),
+    'context_history': fields.Raw(description='List of context summaries'),
+    'created_at': fields.String(description='Context file creation timestamp'),
+    'updated_at': fields.String(description='Last update timestamp')
+})
+
+context_stats_output = api.model('ContextStats', {
+    'user_id': fields.Integer(description='User ID'),
+    'total_entries': fields.Integer(description='Number of context entries'),
+    'created_at': fields.String(description='Context file creation timestamp'),
+    'updated_at': fields.String(description='Last update timestamp'),
+    'oldest_entry': fields.String(description='Timestamp of oldest entry'),
+    'newest_entry': fields.String(description='Timestamp of newest entry')
 })
 
 
@@ -1691,6 +1747,168 @@ def generate_monthly_plan_logic(start_date, notes, assignments):
     
     return monthly_plan
 
+# =============================================================================
+# API ENDPOINTS - AI CHAT (CORRECTED VERSION)
+# =============================================================================
+# Replace the chat endpoints section in app.py with this corrected version
+
+@ns_chat.route('/user/<int:user_id>/message')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatMessage(RestxResource):
+    @ns_chat.doc('send_chat_message')
+    @ns_chat.expect(chat_message_input)
+    @ns_chat.marshal_with(chat_response_output)
+    def post(self, user_id):
+        """Send a message to the AI assistant"""
+        # Import here to avoid circular imports
+        try:
+            from ai_chat import chat_with_ai
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured. Ensure ai_chat.py is in the project directory.')
+        
+        # Verify user exists
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        data = request.json
+        
+        if not data or 'message' not in data:
+            api.abort(400, 'message is required')
+        
+        user_message = data['message']
+        conversation_history = data.get('conversation_history', [])
+        
+        try:
+            result = chat_with_ai(user_id, user_message, conversation_history)
+            
+            return {
+                'response': result['response'],
+                'conversation_history': result['conversation_history'],
+                'tokens_used': result['tokens_used'],
+                'timestamp': datetime.utcnow().isoformat()
+            }
+        
+        except Exception as e:
+            api.abort(500, f'Error communicating with AI: {str(e)}')
+
+
+@ns_chat.route('/user/<int:user_id>/session/end')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatSessionEnd(RestxResource):
+    @ns_chat.doc('end_chat_session')
+    @ns_chat.expect(chat_session_end_input)
+    def post(self, user_id):
+        """End a chat session and save conversation summary to context"""
+        try:
+            from ai_chat import end_conversation_session
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        data = request.json
+        
+        if not data or 'conversation_history' not in data:
+            api.abort(400, 'conversation_history is required')
+        
+        conversation_history = data['conversation_history']
+        
+        try:
+            context_entry = end_conversation_session(user_id, conversation_history)
+            
+            if context_entry:
+                return {
+                    'message': 'Session ended and context saved',
+                    'context_entry': context_entry
+                }, 200
+            else:
+                return {
+                    'message': 'Session ended (no conversation to save)'
+                }, 200
+        
+        except Exception as e:
+            api.abort(500, f'Error ending session: {str(e)}')
+
+
+@ns_chat.route('/user/<int:user_id>/context')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatContext(RestxResource):
+    @ns_chat.doc('get_chat_context')
+    @ns_chat.marshal_with(context_output)
+    def get(self, user_id):
+        """Get the full context history for a user"""
+        try:
+            from ai_chat import load_context
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        try:
+            context = load_context(user_id)
+            return context
+        
+        except Exception as e:
+            api.abort(500, f'Error loading context: {str(e)}')
+    
+    @ns_chat.doc('clear_chat_context')
+    def delete(self, user_id):
+        """Clear all context history for a user"""
+        try:
+            from ai_chat import clear_context
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        try:
+            context = clear_context(user_id)
+            return {
+                'message': 'Context cleared successfully',
+                'context': context
+            }, 200
+        
+        except Exception as e:
+            api.abort(500, f'Error clearing context: {str(e)}')
+
+
+@ns_chat.route('/user/<int:user_id>/context/stats')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatContextStats(RestxResource):
+    @ns_chat.doc('get_context_stats')
+    @ns_chat.marshal_with(context_stats_output)
+    def get(self, user_id):
+        """Get statistics about the user's context history"""
+        try:
+            from ai_chat import get_context_stats
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        try:
+            stats = get_context_stats(user_id)
+            return stats
+        
+        except Exception as e:
+            api.abort(500, f'Error getting context stats: {str(e)}')
 
 # =============================================================================
 # HEALTH CHECK

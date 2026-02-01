@@ -1,0 +1,15 @@
+{
+  "user_id": 1,
+  "context_history": [
+    {
+      "timestamp": "2026-02-01T08:59:51.624102",
+      "summary": "- Tips shared for staying focused while studying included setting specific goals, creating a study schedule, minimizing distractions, taking breaks, staying organized, and staying motivated and healthy\n- Explained the Pomodoro technique as a time management method with 25-minute work intervals followed by short breaks\n- User expressed intention to try 25-minute Pomodoro sessions for better focus; encouraged to adjust technique to suit study habits, stay consistent, and seek further assistance if needed"
+    },
+    {
+      "timestamp": "2026-02-01T08:59:59.770728",
+      "summary": "- Tips for organizing notes in biology class: separate notebooks for each topic, headings/subheadings, visual aids, color-coding, summarizing key points, regular review\n- Considerations for using folders (hierarchical) vs. tags (non-hierarchical) for note organization\n- Experiment with both folders and tags to find the best organizational system for your needs and learning style"
+    }
+  ],
+  "created_at": "2026-02-01T08:59:37.137139",
+  "updated_at": "2026-02-01T08:59:59.772252"
+}
