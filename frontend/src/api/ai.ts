@@ -2,7 +2,7 @@
  * ai.ts — API wrapper for StudyBot with file upload and plan generation
  */
 
-import { API_BASE_URL, DEFAULT_USER_ID } from "./config";
+import { API_BASE_URL } from "./config";
 
 // ---------------------------------------------------------------------------
 // Types

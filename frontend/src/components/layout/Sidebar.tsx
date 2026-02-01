@@ -8,9 +8,7 @@ import {
   HelpCircle,
   GraduationCap,
   LogOut,
-  User,
-  UserCircle,
-  Briefcase
+  UserCircle
 } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 

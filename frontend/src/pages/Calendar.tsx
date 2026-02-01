@@ -307,7 +307,7 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
   const [loading, setLoading] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState<StudyPlan | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [extractedInfo, setExtractedInfo] = useState<string>("");
+  const [setExtractedInfo] = useState<string>("");
   const [showPreferences, setShowPreferences] = useState(false);
   const [generatedPlanJSON, setGeneratedPlanJSON] = useState<StudyPlanJSON | null>(null);
 
@@ -383,7 +383,6 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
       });
 
       const data = await res.json();
-      setExtractedInfo(data.extracted_text);
       setShowPreferences(true);
 
       const parsedMessage = '✅ Files parsed! Here\'s what I found:\n\n' + data.extracted_text + '\n\nNow let\'s set your study preferences.';
@@ -508,7 +507,6 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
     setMessages([]);
     setGeneratedPlan(null);
     setUploadedFiles([]);
-    setExtractedInfo("");
     setShowPreferences(false);
     setGeneratedPlanJSON(null);
     setSaveResult("");
