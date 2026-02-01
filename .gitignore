@@ -69,3 +69,4 @@ powerbi_*.csv
 
 .eng
 node_modules/
+*.sh

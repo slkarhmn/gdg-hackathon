@@ -5,7 +5,9 @@ import { msalConfig, loginRequest } from './authConfig';
 interface AuthContextType {
   account: any | null;
   isAuthenticated: boolean;
+  isGuest: boolean;
   login: () => Promise<void>;
+  loginAsGuest: () => void;
   logout: () => void;
   getAccessToken: () => Promise<string | null>;
   isLoading: boolean;
@@ -16,19 +18,36 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Initialize MSAL instance
 const msalInstance = new PublicClientApplication(msalConfig);
 
+const GUEST_ACCOUNT_KEY = 'studysync_guest_mode';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [account, setAccount] = useState<any>(null);
+  const [isGuest, setIsGuest] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const initialize = async () => {
       try {
+        const guestMode = sessionStorage.getItem(GUEST_ACCOUNT_KEY);
+        if (guestMode === 'true') {
+          setIsGuest(true);
+          setAccount({ name: 'Guest User', username: 'guest@studysync.local' });
+          setIsLoading(false);
+          return;
+        }
+
         await msalInstance.initialize();
         
         // Handle redirect response (important!)
         const response = await msalInstance.handleRedirectPromise();
         if (response?.account) {
           setAccount(response.account);
+          
+          // ✅ NEW: Save access token to localStorage after redirect
+          if (response.accessToken) {
+            localStorage.setItem('microsoft_access_token', response.accessToken);
+            console.log('✅ Access token saved to localStorage');
+          }
         }
         
         const accounts = msalInstance.getAllAccounts();
@@ -57,14 +76,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginAsGuest = () => {
+    sessionStorage.setItem(GUEST_ACCOUNT_KEY, 'true');
+    setIsGuest(true);
+    setAccount({ name: 'Guest User', username: 'guest@studysync.local' });
+  };
+
   const logout = () => {
-    msalInstance.logoutRedirect({
-      account: account,
-    });
+    if (isGuest) {
+      sessionStorage.removeItem(GUEST_ACCOUNT_KEY);
+      setIsGuest(false);
+      setAccount(null);
+    } else {
+      msalInstance.logoutRedirect({
+        account: account,
+      });
+    }
   };
 
   const getAccessToken = async (): Promise<string | null> => {
-    if (!account) return null;
+    if (!account || isGuest) return null;
 
     try {
       // acquireTokenSilent will throw InteractionRequiredAuthError if the
@@ -76,6 +107,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...loginRequest,
         account: account,
       });
+      
+      // ✅ NEW: Save token to localStorage whenever we get a fresh one
+      if (response.accessToken) {
+        localStorage.setItem('microsoft_access_token', response.accessToken);
+      }
+      
       return response.accessToken;
     } catch (error) {
       // Only redirect for consent/scope errors. Other errors (network, etc.)
@@ -101,7 +138,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value = {
     account,
     isAuthenticated: !!account,
+    isGuest,
     login,
+    loginAsGuest,
     logout,
     getAccessToken,
     isLoading,

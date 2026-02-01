@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
   ChevronRight,
   ChevronDown,
+  ChevronLeft,
   FileText,
   Folder,
   FolderPlus,
@@ -14,12 +15,17 @@ import {
   PanelLeftClose,
   PanelLeft,
   Tag,
-  Repeat
+  Repeat,
+  Timer,
+  Play,
+  Pause,
+  RotateCcw
 } from 'lucide-react';
 import './Notes.css';
 import { fetchNotes, createNote, updateNote, fetchTagNames, fetchSpacedRepetitions, recordNoteReview, removeNoteFromSpacedRepetition } from '../api';
 import type { BackendNote } from '../api';
-import { DEFAULT_USER_ID } from '../api/config';
+import { DEFAULT_USER_ID, API_BASE_URL } from '../api/config';
+import { useAIChat } from '../contexts/AIChatContext';
 
 interface Note {
   id: string;
@@ -46,8 +52,15 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface NotesProps {
   onNavigate: (page: Page) => void;
-  initialOpenNoteId?: string | null;
-  onInitialOpenNoteHandled?: () => void;
+  initialPreloadedNote?: BackendNote | null;
+  onClearPreloadedNote?: () => void;
+  // Persisted tab state from App
+  persistedOpenTabs?: OpenTab[];
+  persistedActiveTabId?: string;
+  onTabsChange?: (tabs: OpenTab[]) => void;
+  onActiveTabChange?: (tabId: string) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -89,7 +102,7 @@ function extractNoteContent(note: BackendNote): string {
 // Transform backend notes to folder structure grouped by subject
 function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
   const folderMap = new Map<string, Note[]>();
-  
+
   notes.forEach(note => {
     const subject = note.subject || 'Uncategorized';
     if (!folderMap.has(subject)) {
@@ -105,7 +118,7 @@ function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
 
   const folders: LectureFolder[] = [];
   let index = 1;
-  
+
   folderMap.forEach((folderNotes, folderName) => {
     folders.push({
       id: index.toString(),
@@ -119,15 +132,25 @@ function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
   return folders;
 }
 
-const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialOpenNoteHandled }) => {
+const Notes: React.FC<NotesProps> = ({ 
+  onNavigate, 
+  initialPreloadedNote, 
+  onClearPreloadedNote,
+  persistedOpenTabs,
+  persistedActiveTabId,
+  onTabsChange,
+  onActiveTabChange,
+  viewMode = 'student', 
+  onViewModeToggle 
+}) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('notes');
   const [folders, setFolders] = useState<LectureFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setAllNotesData] = useState<BackendNote[]>([]);
-  const handledInitialOpenNoteIdRef = useRef<string | null>(null);
-  const initialOpenNoteIdRef = useRef<string | null>(null);
-  initialOpenNoteIdRef.current = initialOpenNoteId ?? null;
+  const initialPreloadedNoteIdRef = useRef<string | null>(null);
+  const handledPreloadedNoteIdRef = useRef<number | null>(null);
+  initialPreloadedNoteIdRef.current = initialPreloadedNote?.id != null ? String(initialPreloadedNote.id) : null;
 
   // Fetch notes from API
   useEffect(() => {
@@ -138,11 +161,13 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
 
         const notesData = await fetchNotes();
         setAllNotesData(notesData);
-        
+
         // Group notes into folders by subject
         const groupedFolders = groupNotesIntoFolders(notesData);
-        
+
         // If no notes from API, use placeholder folders
+        
+        // If no notes from API, use placeholder folders (but don't auto-open any note)
         if (groupedFolders.length === 0) {
           const placeholderFolders: LectureFolder[] = [
             {
@@ -160,15 +185,15 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
             }
           ];
           setFolders(placeholderFolders);
-          
+
           // Set initial tab
           setOpenTabs([{ id: 'placeholder-1', title: 'Welcome to Notes', folderId: '1' }]);
           setActiveTabId('placeholder-1');
         } else {
           setFolders(groupedFolders);
-          
-          // Only set initial tab to first note when not opening a specific note (e.g. from Grades)
-          if (!initialOpenNoteIdRef.current && groupedFolders[0]?.notes[0]) {
+
+          // Set initial tab to first note of first folder
+          if (groupedFolders[0]?.notes[0]) {
             const firstNote = groupedFolders[0].notes[0];
             setOpenTabs([{ id: firstNote.id, title: firstNote.title, folderId: groupedFolders[0].id }]);
             setActiveTabId(firstNote.id);
@@ -187,13 +212,23 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
     loadNotes();
   }, []);
 
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string>('');
+  // Initialize tabs from persisted state (preserved across navigation)
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>(persistedOpenTabs ?? []);
+  const [activeTabId, setActiveTabId] = useState<string>(persistedActiveTabId ?? '');
+
+  // Sync tab changes back to parent (App.tsx) for persistence
+  useEffect(() => {
+    onTabsChange?.(openTabs);
+  }, [openTabs, onTabsChange]);
+
+  useEffect(() => {
+    onActiveTabChange?.(activeTabId);
+  }, [activeTabId, onActiveTabChange]);
   const [searchQuery, setSearchQuery] = useState('');
   const [notesSidebarCollapsed, setNotesSidebarCollapsed] = useState(false);
   const [showAIChat, setShowAIChat] = useState(false);
-  const [aiMessages, setAIMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
   const [aiInput, setAIInput] = useState('');
+  const { messages: aiMessages, isLoading: aiLoading, sendMessage: sendAIMessage, endSession: endAISession } = useAIChat();
   const [selectedText, setSelectedText] = useState('');
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
   const [spacedRepNoteIds, setSpacedRepNoteIds] = useState<Set<number>>(new Set());
@@ -206,8 +241,29 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorTitleRef = useRef('');
   const editorBodyRef = useRef('');
+  // --- AI-powered summary & export states ---
+  const [aiSummary, setAISummary] = useState('');
+  const [aiQuestions, setAIQuestions] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingAI, setIsSavingAI] = useState(false);
+
+
 
   const editorRef = useRef<HTMLDivElement>(null);
+
+  // Pomodoro timer state
+  const [pomodoroCollapsed, setPomodoroCollapsed] = useState(false);
+  const [workMinutes, setWorkMinutes] = useState(25);
+  const [shortBreakMinutes, setShortBreakMinutes] = useState(5);
+  const [longBreakMinutes, setLongBreakMinutes] = useState(15);
+  const [pomodorosBeforeLongBreak, setPomodorosBeforeLongBreak] = useState(4);
+  type PomodoroPhase = 'work' | 'shortBreak' | 'longBreak';
+  const [pomodoroPhase, setPomodoroPhase] = useState<PomodoroPhase>('work');
+  const [pomodoroSecondsRemaining, setPomodoroSecondsRemaining] = useState(25 * 60);
+  const [pomodoroRunning, setPomodoroRunning] = useState(false);
+  const [pomodoroCount, setPomodoroCount] = useState(0); // completed work sessions
+  const pomodoroIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pomodoroInitialSecondsRef = useRef(25 * 60);
 
   const loadSpacedRepetitions = () => {
     fetchSpacedRepetitions(DEFAULT_USER_ID)
@@ -295,27 +351,163 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
     }
   };
 
-  // Open a specific note when navigating from Grades (or elsewhere) with initialOpenNoteId
+  // Open the preloaded note when navigating from Grades (API-fetched note)
   useEffect(() => {
-    if (!initialOpenNoteId || loading || folders.length === 0) return;
-    if (handledInitialOpenNoteIdRef.current === initialOpenNoteId) return;
+    if (!initialPreloadedNote || loading) return;
+    if (handledPreloadedNoteIdRef.current === initialPreloadedNote.id) return;
+    handledPreloadedNoteIdRef.current = initialPreloadedNote.id;
 
-    for (const folder of folders) {
-      const note = folder.notes.find((n) => n.id === initialOpenNoteId);
-      if (note) {
-        handledInitialOpenNoteIdRef.current = initialOpenNoteId;
-        setOpenTabs((prev) => {
-          const existing = prev.find((tab) => tab.id === initialOpenNoteId);
-          if (existing) return prev;
-          return [...prev, { id: note.id, title: note.title, folderId: folder.id }];
-        });
-        setActiveTabId(note.id);
-        onInitialOpenNoteHandled?.();
-        return;
-      }
+    const noteIdStr = initialPreloadedNote.id.toString();
+    const noteForEditor: Note = {
+      id: noteIdStr,
+      title: extractNoteTitle(initialPreloadedNote),
+      content: extractNoteContent(initialPreloadedNote),
+      tags: initialPreloadedNote.tags || [],
+    };
+    const subject = initialPreloadedNote.subject || 'Uncategorized';
+
+    if (folders.length === 0) {
+      // No folders yet: create a single folder with just this note and open it
+      const folderId = '1';
+      setFolders([
+        {
+          id: folderId,
+          name: subject,
+          notes: [noteForEditor],
+          isExpanded: true,
+        },
+      ]);
+      // Preserve existing tabs and add the new note as a tab
+      setOpenTabs((prev) => {
+        const existing = prev.find((tab) => tab.id === noteIdStr);
+        if (existing) return prev.map((t) => (t.id === noteIdStr ? { ...t, title: noteForEditor.title } : t));
+        return [...prev, { id: noteIdStr, title: noteForEditor.title, folderId }];
+      });
+      setActiveTabId(noteIdStr);
+      onClearPreloadedNote?.();
+      return;
     }
-    onInitialOpenNoteHandled?.();
-  }, [initialOpenNoteId, loading, folders, onInitialOpenNoteHandled]);
+
+    // Merge preloaded note into folders (replace by id or add to subject folder)
+    let folderId: string | null = null;
+    const nextFolders = folders.map((folder) => {
+      const existingIndex = folder.notes.findIndex((n) => n.id === noteIdStr);
+      if (existingIndex >= 0) {
+        folderId = folder.id;
+        const notes = [...folder.notes];
+        notes[existingIndex] = noteForEditor;
+        return { ...folder, notes };
+      }
+      if (folder.name === subject) {
+        folderId = folder.id;
+        const hasNote = folder.notes.some((n) => n.id === noteIdStr);
+        const notes = hasNote
+          ? folder.notes.map((n) => (n.id === noteIdStr ? noteForEditor : n))
+          : [...folder.notes, noteForEditor];
+        return { ...folder, notes };
+      }
+      return folder;
+    });
+
+    if (folderId == null) {
+      // No matching folder: add a new folder for this subject
+      folderId = String(folders.length + 1);
+      nextFolders.push({
+        id: folderId,
+        name: subject,
+        notes: [noteForEditor],
+        isExpanded: true,
+      });
+    }
+
+    const openFolderId: string = folderId;
+
+    setFolders(nextFolders);
+    setOpenTabs((prev) => {
+      const existing = prev.find((tab) => tab.id === noteIdStr);
+      if (existing) return prev.map((t) => (t.id === noteIdStr ? { ...t, title: noteForEditor.title } : t));
+      return [...prev, { id: noteIdStr, title: noteForEditor.title, folderId: openFolderId }];
+    });
+    setActiveTabId(noteIdStr);
+    onClearPreloadedNote?.();
+  }, [initialPreloadedNote, loading, folders, onClearPreloadedNote]);
+
+  // Pomodoro: get initial seconds for current phase
+  const getPomodoroPhaseMinutes = useCallback(() => {
+    if (pomodoroPhase === 'work') return workMinutes;
+    if (pomodoroPhase === 'shortBreak') return shortBreakMinutes;
+    return longBreakMinutes;
+  }, [pomodoroPhase, workMinutes, shortBreakMinutes, longBreakMinutes]);
+
+  const advancePomodoroPhase = useCallback(() => {
+    setPomodoroRunning(false);
+    if (pomodoroPhase === 'work') {
+      const nextCount = pomodoroCount + 1;
+      setPomodoroCount(nextCount);
+      if (nextCount >= pomodorosBeforeLongBreak) {
+        setPomodoroPhase('longBreak');
+        setPomodoroSecondsRemaining(longBreakMinutes * 60);
+        pomodoroInitialSecondsRef.current = longBreakMinutes * 60;
+      } else {
+        setPomodoroPhase('shortBreak');
+        setPomodoroSecondsRemaining(shortBreakMinutes * 60);
+        pomodoroInitialSecondsRef.current = shortBreakMinutes * 60;
+      }
+    } else {
+      if (pomodoroPhase === 'longBreak') setPomodoroCount(0);
+      setPomodoroPhase('work');
+      setPomodoroSecondsRemaining(workMinutes * 60);
+      pomodoroInitialSecondsRef.current = workMinutes * 60;
+    }
+  }, [pomodoroPhase, pomodoroCount, pomodorosBeforeLongBreak, workMinutes, shortBreakMinutes, longBreakMinutes]);
+
+  useEffect(() => {
+    if (!pomodoroRunning) return;
+    pomodoroIntervalRef.current = setInterval(() => {
+      setPomodoroSecondsRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => {
+      if (pomodoroIntervalRef.current) {
+        clearInterval(pomodoroIntervalRef.current);
+        pomodoroIntervalRef.current = null;
+      }
+    };
+  }, [pomodoroRunning]);
+
+  // When timer hits 0, advance to next phase
+  useEffect(() => {
+    if (!pomodoroRunning || pomodoroSecondsRemaining > 0) return;
+    advancePomodoroPhase();
+  }, [pomodoroRunning, pomodoroSecondsRemaining, advancePomodoroPhase]);
+
+  const startPomodoro = () => {
+    setPomodoroRunning(true);
+  };
+
+  const pausePomodoro = () => {
+    setPomodoroRunning(false);
+  };
+
+  const resetPomodoro = () => {
+    setPomodoroRunning(false);
+    const mins = getPomodoroPhaseMinutes();
+    setPomodoroSecondsRemaining(mins * 60);
+    pomodoroInitialSecondsRef.current = mins * 60;
+  };
+
+  const formatPomodoroTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // When duration settings change and timer is not running, update remaining time for current phase
+  useEffect(() => {
+    if (pomodoroRunning) return;
+    const mins = getPomodoroPhaseMinutes();
+    setPomodoroSecondsRemaining(mins * 60);
+    pomodoroInitialSecondsRef.current = mins * 60;
+  }, [workMinutes, shortBreakMinutes, longBreakMinutes, pomodoroPhase, pomodoroRunning, getPomodoroPhaseMinutes]);
 
   const handleTextSelection = () => {
     const selection = window.getSelection();
@@ -338,39 +530,32 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
     }
   };
 
+  const getCurrentNoteContext = useCallback(() => {
+    const title = editorTitleRef.current || editorTitle;
+    const body = editorBodyRef.current || editorBody;
+    return (title ? `# ${title}\n\n` : '') + (body || '');
+  }, [editorTitle, editorBody]);
+
   const askAIAboutSelection = () => {
     if (selectedText) {
       setShowAIChat(true);
-      setAIMessages([
-        ...aiMessages,
-        { role: 'user', text: `Can you explain this: "${selectedText}"` }
-      ]);
+      const question = `Can you explain this: "${selectedText}"`;
+      sendAIMessage(question, 'notes', getCurrentNoteContext());
       setSelectedText('');
       setSelectionPosition(null);
-
-      // Simulate AI response
-      setTimeout(() => {
-        setAIMessages(prev => [
-          ...prev,
-          { role: 'ai', text: `I'd be happy to explain "${selectedText}"! This concept relates to the principles of user interface design...` }
-        ]);
-      }, 1000);
     }
   };
 
-  const sendAIMessage = () => {
+  const handleSendAIMessage = () => {
     if (aiInput.trim()) {
-      setAIMessages([...aiMessages, { role: 'user', text: aiInput }]);
+      sendAIMessage(aiInput.trim(), 'notes', getCurrentNoteContext());
       setAIInput('');
-
-      // Simulate AI response
-      setTimeout(() => {
-        setAIMessages(prev => [
-          ...prev,
-          { role: 'ai', text: 'I understand your question. Let me help you with that...' }
-        ]);
-      }, 1000);
     }
+  };
+
+  const handleCloseAIChat = () => {
+    endAISession(); // Saves context to backend for future sessions
+    setShowAIChat(false);
   };
 
   useEffect(() => {
@@ -417,12 +602,12 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
                       {note.tags && note.tags.length > 0 && (
                         <div style={{ display: 'flex', gap: '4px', marginTop: '2px', flexWrap: 'wrap' }}>
                           {note.tags.slice(0, 3).map((tag, idx) => (
-                            <span 
-                              key={idx} 
-                              style={{ 
-                                fontSize: '0.65rem', 
-                                backgroundColor: '#e5e7eb', 
-                                padding: '1px 4px', 
+                            <span
+                              key={idx}
+                              style={{
+                                fontSize: '0.65rem',
+                                backgroundColor: '#e5e7eb',
+                                padding: '1px 4px',
                                 borderRadius: '3px',
                                 color: '#4b5563'
                               }}
@@ -652,7 +837,7 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
   if (loading) {
     return (
       <div className="notes-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="notes-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%' }}>
             <p>Loading notes...</p>
@@ -668,11 +853,11 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
 
       <div className="notes-content-wrapper">
         {error && (
-          <div style={{ 
-            padding: '1rem', 
-            backgroundColor: '#fee2e2', 
-            color: '#991b1b', 
-            borderRadius: '8px', 
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#fee2e2',
+            color: '#991b1b',
+            borderRadius: '8px',
             margin: '1rem',
             position: 'absolute',
             top: 0,
@@ -683,7 +868,7 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
             {error}
           </div>
         )}
-        
+
         {/* Collapsible Notes Sidebar */}
         <aside className={`notes-sidebar ${notesSidebarCollapsed ? 'collapsed' : ''}`}>
           {!notesSidebarCollapsed && (
@@ -912,11 +1097,11 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
                 )}
               </>
             ) : (
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
                 height: '50vh',
                 color: '#6b7280'
               }}>
@@ -956,7 +1141,7 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
             </div>
           )}
 
-          {/* AI Chat Panel */}
+                    {/* AI Chat Panel */}
           {showAIChat && (
             <div className="ai-chat-panel">
               <div className="ai-chat-header">
@@ -966,24 +1151,31 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
                 </div>
                 <button
                   className="ai-close-btn"
-                  onClick={() => setShowAIChat(false)}
+                  onClick={handleCloseAIChat}
                 >
                   <X size={18} />
                 </button>
               </div>
 
               <div className="ai-chat-messages">
-                {aiMessages.length === 0 ? (
+                {aiMessages.length === 0 && !aiLoading ? (
                   <div className="ai-empty-state">
                     <Sparkles size={32} />
                     <p>Ask me anything about this note!</p>
                   </div>
                 ) : (
-                  aiMessages.map((msg, idx) => (
-                    <div key={idx} className={`ai-message ${msg.role}`}>
-                      <div className="message-content">{msg.text}</div>
-                    </div>
-                  ))
+                  <>
+                    {aiMessages.map((msg, idx) => (
+                      <div key={idx} className={`ai-message ${msg.role}`}>
+                        <div className="message-content">{msg.text}</div>
+                      </div>
+                    ))}
+                    {aiLoading && (
+                      <div className="ai-message ai">
+                        <div className="message-content" style={{ opacity: 0.7 }}>Thinking...</div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -993,19 +1185,219 @@ const Notes: React.FC<NotesProps> = ({ onNavigate, initialOpenNoteId, onInitialO
                   placeholder="Ask a question..."
                   value={aiInput}
                   onChange={(e) => setAIInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendAIMessage()}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendAIMessage()}
+                  disabled={aiLoading}
                 />
                 <button
                   className="ai-send-btn"
-                  onClick={sendAIMessage}
-                  disabled={!aiInput.trim()}
+                  onClick={handleSendAIMessage}
+                  disabled={!aiInput.trim() || aiLoading}
                 >
                   <Send size={18} />
                 </button>
               </div>
+
+              {/* AI summary + export */}
+              <div className="ai-generate-section">
+                <button
+                  className="ai-generate-btn"
+                  disabled={isGenerating || !activeNote || activeNote.id.startsWith('placeholder')}
+                  onClick={async () => {
+                    if (!activeNote || activeNote.id.startsWith('placeholder')) return;
+                    setIsGenerating(true);
+                    try {
+                      const res = await fetch(
+                        `${API_BASE_URL}/users/${DEFAULT_USER_ID}/generate-ai-note`,
+                        {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ note_id: parseInt(activeNote.id, 10) }),
+                        }
+                      );
+                      if (res.ok) {
+                        const data = await res.json();
+                        const summary = data.summary || '';
+                        const questions = data.questions || data.exam_questions || '';
+                        const appendText = `\n\n## Summary\n${summary}\n\n## Possible Exam Questions\n${questions}`;
+                        const newBody = (editorBodyRef.current || editorBody || '') + appendText;
+                        const noteId = parseInt(activeNote.id, 10);
+                        await updateNote(noteId, {
+                          content: {
+                            title: editorTitleRef.current || 'Untitled Note',
+                            body: newBody,
+                            summary,
+                            questions,
+                          },
+                        });
+                        setEditorBody(newBody);
+                        editorBodyRef.current = newBody;
+                        setFolders((prev) =>
+                          prev.map((folder) => ({
+                            ...folder,
+                            notes: folder.notes.map((n) =>
+                              n.id === activeNote.id ? { ...n, content: newBody } : n
+                            ),
+                          }))
+                        );
+                        setAISummary(summary);
+                        setAIQuestions(questions);
+                      } else {
+                        alert('Failed to generate summary');
+                      }
+                    } catch (err) {
+                      console.error('Generate notes failed:', err);
+                      alert('Failed to generate and save notes');
+                    } finally {
+                      setIsGenerating(false);
+                    }
+                  }}
+                >
+                  <Sparkles size={16} />
+                  {isGenerating ? 'Generating...' : 'Generate lecture notes'}
+                </button>
+
+                {(aiSummary || aiQuestions) && (
+                  <div className="ai-generated-preview">
+                    <h3>Generated</h3>
+                    <p className="ai-generated-hint">Summary and questions have been added to your note above.</p>
+                    <div className="ai-export-buttons">
+                      <button
+                        className="ai-export-btn"
+                        onClick={() =>
+                          window.open(
+                            `${API_BASE_URL}/notes/${activeNote?.id}/export?format=pdf`,
+                            '_blank'
+                          )
+                        }
+                      >
+                        Export PDF
+                      </button>
+                      <button
+                        className="ai-export-btn"
+                        onClick={() =>
+                          window.open(
+                            `${API_BASE_URL}/notes/${activeNote?.id}/export?format=docx`,
+                            '_blank'
+                          )
+                        }
+                      >
+                        Export DOCX
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>
+
+        {/* Collapsible Pomodoro Timer - right side */}
+        <aside className={`pomodoro-panel ${pomodoroCollapsed ? 'collapsed' : ''}`}>
+          {!pomodoroCollapsed && (
+            <>
+              <div className="pomodoro-header">
+                <Timer size={18} />
+                <span className="pomodoro-title">Pomodoro</span>
+                <button
+                  type="button"
+                  className="pomodoro-collapse-btn"
+                  onClick={() => setPomodoroCollapsed(true)}
+                  title="Collapse timer"
+                  aria-label="Collapse timer"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+              <div className="pomodoro-body">
+                <div className={`pomodoro-phase-badge ${pomodoroPhase}`}>
+                  {pomodoroPhase === 'work' && `Focus · ${pomodoroCount}/${pomodorosBeforeLongBreak}`}
+                  {pomodoroPhase === 'shortBreak' && 'Short break'}
+                  {pomodoroPhase === 'longBreak' && 'Long break'}
+                </div>
+                <div className="pomodoro-time">{formatPomodoroTime(pomodoroSecondsRemaining)}</div>
+                <div className="pomodoro-controls">
+                  <button
+                    type="button"
+                    className="pomodoro-btn primary"
+                    onClick={pomodoroRunning ? pausePomodoro : startPomodoro}
+                    title={pomodoroRunning ? 'Pause' : 'Start'}
+                  >
+                    {pomodoroRunning ? <Pause size={20} /> : <Play size={20} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="pomodoro-btn"
+                    onClick={resetPomodoro}
+                    title="Reset"
+                  >
+                    <RotateCcw size={18} />
+                  </button>
+                </div>
+                <div className="pomodoro-settings">
+                  <label className="pomodoro-setting">
+                    <span>Work (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={workMinutes}
+                      onChange={(e) => setWorkMinutes(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 25)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Short break (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={shortBreakMinutes}
+                      onChange={(e) => setShortBreakMinutes(Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 5)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Long break (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={45}
+                      value={longBreakMinutes}
+                      onChange={(e) => setLongBreakMinutes(Math.max(1, Math.min(45, parseInt(e.target.value, 10) || 15)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Pomodoros until long</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={8}
+                      value={pomodorosBeforeLongBreak}
+                      onChange={(e) => setPomodorosBeforeLongBreak(Math.max(2, Math.min(8, parseInt(e.target.value, 10) || 4)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
+
+        {pomodoroCollapsed && (
+          <div className="pomodoro-expand-container">
+            <button
+              type="button"
+              className="pomodoro-expand-btn"
+              onClick={() => setPomodoroCollapsed(false)}
+              title="Open Pomodoro timer"
+              aria-label="Open Pomodoro timer"
+            >
+              <ChevronLeft size={20} />
+              <Timer size={18} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -10,23 +10,29 @@ import {
   fetchUpcomingAssignments,
   toDashboardAssignments,
   fetchNotes,
+  fetchNoteById,
   toDashboardNotes,
   fetchSpacedRepetitions,
   toHeatmapData,
-  getDueForReview
 } from '../api';
-import type { BackendSpacedRepetition } from '../api';
+import type { BackendSpacedRepetition, BackendNote } from '../api';
+import { useAuth } from '../auth/AuthContext';
+import { GraphService } from '../auth/graphService';
 
 interface DashboardProps {
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, options?: { preloadedNote?: BackendNote }) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle  }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [currentStreak, setCurrentStreak] = useState(0);
   const [longestStreak, setLongestStreak] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userName, setUserName] = useState('User');
+  const { account, isGuest, getAccessToken } = useAuth();
 
   const [todos, setTodos] = useState<TodoItem[]>([
     { id: 1, text: 'get up in the morning', completed: false },
@@ -49,7 +55,29 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const currentYear = new Date().getFullYear();
 
-  // Fetch data from API on mount
+  // Fetch user profile - separate useEffect
+  useEffect(() => {
+    if (isGuest && account?.name) {
+      setUserName(account.name);
+      return;
+    }
+    const fetchUserProfile = async () => {
+      try {
+        const token = await getAccessToken();
+        if (token) {
+          const graphService = new GraphService(token);
+          const profile = await graphService.getUserProfile();
+          setUserName(profile.givenName || profile.displayName || 'User');
+        }
+      } catch (err) {
+        console.error('Failed to fetch user profile:', err);
+      }
+    };
+
+    fetchUserProfile();
+  }, [getAccessToken, isGuest, account?.name]);
+
+  // Fetch dashboard data
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -156,9 +184,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     onNavigate(tab);
   };
 
-  const handleNoteClick = (noteId: number) => {
-    console.log('Note clicked:', noteId);
-    onNavigate('notes');
+  const [openingNoteId, setOpeningNoteId] = useState<number | null>(null);
+
+  const handleNoteClick = async (noteId: number) => {
+    if (openingNoteId !== null) return; // Prevent multiple clicks
+    setOpeningNoteId(noteId);
+    try {
+      const fetchedNote = await fetchNoteById(noteId);
+      onNavigate('notes', { preloadedNote: fetchedNote });
+    } catch (err) {
+      console.error('Failed to fetch note:', err);
+      setOpeningNoteId(null);
+    }
   };
 
   const handleTodoToggle = (todoId: number) => {
@@ -176,9 +213,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   if (loading) {
     return (
       <div className="dashboard-container">
-        <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <main className="main-content">
-          <Header userName="Saachi" />
+          <Header userName={userName} />
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
             <p>Loading dashboard...</p>
           </div>
@@ -189,10 +226,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   return (
     <div className="dashboard-container">
-      <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} />
+      <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
       
       <main className="main-content">
-        <Header userName="Saachi" />
+        <Header userName={userName} />
         
         {error && (
           <div style={{ padding: '1rem', backgroundColor: '#fee2e2', color: '#991b1b', borderRadius: '8px', marginBottom: '1rem' }}>

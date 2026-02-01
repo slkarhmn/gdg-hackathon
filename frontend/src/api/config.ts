@@ -21,4 +21,16 @@ export const ENDPOINTS = {
   tags: (userId: number) => `${API_BASE_URL}/tags/user/${userId}`,
   tagNames: (userId: number) => `${API_BASE_URL}/tags/user/${userId}/names`,
   user: (userId: number) => `${API_BASE_URL}/users/${userId}`,
+  // Resources endpoints
+  resources: (userId: number) => `${API_BASE_URL}/resources/user/${userId}`,
+  resourceUpload: (userId: number) => `${API_BASE_URL}/resources/user/${userId}/upload`,
+  resourceById: (resourceId: number) => `${API_BASE_URL}/resources/${resourceId}`,
+  resourceFile: (resourceId: number) => `${API_BASE_URL}/resources/${resourceId}/file`,
+  resourceCourses: (userId: number) => `${API_BASE_URL}/resources/user/${userId}/courses`,
+  resourceBatchDelete: (userId: number) => `${API_BASE_URL}/resources/user/${userId}/batch-delete`,
+  // AI Chat - unified endpoint for all AI textboxes
+  chatMessage: (userId: number) => `${API_BASE_URL}/chat/user/${userId}/message`,
+  chatSessionEnd: (userId: number) => `${API_BASE_URL}/chat/user/${userId}/session/end`,
+  chatContext: (userId: number) => `${API_BASE_URL}/chat/user/${userId}/context`,
+  chatContextStats: (userId: number) => `${API_BASE_URL}/chat/user/${userId}/context/stats`,
 };
