@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
   FolderOpen,
@@ -12,33 +12,37 @@ import {
   BookOpen,
   Search,
   Plus,
-  Filter,
-  Download
+  Download,
+  Upload,
+  X,
+  Video,
+  Music,
+  Image as ImageIcon,
+  Archive,
+  File,
+  Trash2,
+  ExternalLink
 } from 'lucide-react';
+import type { ResourceData } from '../api/resources';
+import type { CourseData } from '../api/courses';
+import {
+  uploadResource,
+  getResources,
+  deleteResource,
+  batchDeleteResources,
+  getResourceFileUrl,
+  formatResourceDate
+} from '../api/resources';
+import {
+  getCourses,
+  createCourse,
+  deleteCourse
+} from '../api/courses';
+import { DEFAULT_USER_ID } from '../api/config';
 import './ProfessorDashboard.css';
 
-interface LectureNote {
-  id: string;
-  title: string;
-  fileName: string;
-  uploadDate: string;
-  size: string;
-}
-
-interface Week {
-  weekNumber: number;
-  title: string;
-  lectures: LectureNote[];
-  isExpanded: boolean;
-}
-
-interface Course {
-  id: string;
-  name: string;
-  code: string;
-  semester: string;
-  studentCount: number;
-  weeks: Week[];
+// Extended course with UI state
+interface CourseWithUI extends CourseData {
   isExpanded: boolean;
 }
 
@@ -50,153 +54,323 @@ interface ProfessorDashboardProps {
   userProfile: any;
 }
 
-const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, graphService, userProfile }) => {
+const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, graphService: _graphService, userProfile: _userProfile }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('professor');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
-  const [selectedLectures, setSelectedLectures] = useState<Set<string>>(new Set());
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [quizPrompt, setQuizPrompt] = useState('');
   const [recipientEmail, setRecipientEmail] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const [courses, setCourses] = useState<Course[]>([
-    {
-      id: '1',
-      name: 'Human Computer Interaction',
-      code: 'CS 401',
-      semester: 'Spring 2026',
-      studentCount: 45,
-      isExpanded: false,
-      weeks: Array.from({ length: 12 }, (_, i) => ({
-        weekNumber: i + 1,
-        title: `Week ${i + 1}`,
-        isExpanded: false,
-        lectures: [
-          {
-            id: `1-${i + 1}-1`,
-            title: `Lecture ${i * 2 + 1}: Introduction to Topic`,
-            fileName: `lecture_${i * 2 + 1}.pdf`,
-            uploadDate: '2026-01-15',
-            size: '2.4 MB'
-          },
-          {
-            id: `1-${i + 1}-2`,
-            title: `Lecture ${i * 2 + 2}: Advanced Concepts`,
-            fileName: `lecture_${i * 2 + 2}.pdf`,
-            uploadDate: '2026-01-17',
-            size: '3.1 MB'
-          }
-        ]
-      }))
-    },
-    {
-      id: '2',
-      name: 'Data Structures & Algorithms',
-      code: 'CS 301',
-      semester: 'Spring 2026',
-      studentCount: 62,
-      isExpanded: false,
-      weeks: Array.from({ length: 12 }, (_, i) => ({
-        weekNumber: i + 1,
-        title: `Week ${i + 1}`,
-        isExpanded: false,
-        lectures: [
-          {
-            id: `2-${i + 1}-1`,
-            title: `Lecture ${i * 2 + 1}: Core Algorithms`,
-            fileName: `ds_lecture_${i * 2 + 1}.pdf`,
-            uploadDate: '2026-01-16',
-            size: '1.8 MB'
-          },
-          {
-            id: `2-${i + 1}-2`,
-            title: `Lecture ${i * 2 + 2}: Implementation`,
-            fileName: `ds_lecture_${i * 2 + 2}.pdf`,
-            uploadDate: '2026-01-18',
-            size: '2.2 MB'
-          }
-        ]
-      }))
-    },
-    {
-      id: '3',
-      name: 'Database Systems',
-      code: 'CS 402',
-      semester: 'Spring 2026',
-      studentCount: 38,
-      isExpanded: false,
-      weeks: Array.from({ length: 12 }, (_, i) => ({
-        weekNumber: i + 1,
-        title: `Week ${i + 1}`,
-        isExpanded: false,
-        lectures: [
-          {
-            id: `3-${i + 1}-1`,
-            title: `Lecture ${i * 2 + 1}: Database Concepts`,
-            fileName: `db_lecture_${i * 2 + 1}.pdf`,
-            uploadDate: '2026-01-14',
-            size: '2.9 MB'
-          }
-        ]
-      }))
+  // Resource management state
+  const [resources, setResources] = useState<ResourceData[]>([]);
+  const [selectedResources, setSelectedResources] = useState<Set<number>>(new Set());
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [viewingResource, setViewingResource] = useState<ResourceData | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Upload form state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadDescription, setUploadDescription] = useState('');
+  const [uploadCourseId, setUploadCourseId] = useState('');
+  const [uploadWeekNumber, setUploadWeekNumber] = useState<number | undefined>(undefined);
+
+  // Load resources on mount
+  useEffect(() => {
+    loadResources();
+  }, []);
+
+  const loadResources = async () => {
+    try {
+      const data = await getResources(DEFAULT_USER_ID);
+      setResources(data);
+    } catch (error) {
+      console.error('Failed to load resources:', error);
     }
-  ]);
+  };
+
+  // Get file type icon component
+  const getFileIcon = (fileType: string) => {
+    switch (fileType) {
+      case 'pdf':
+        return <FileText size={16} />;
+      case 'video':
+        return <Video size={16} />;
+      case 'audio':
+        return <Music size={16} />;
+      case 'image':
+        return <ImageIcon size={16} />;
+      case 'archive':
+        return <Archive size={16} />;
+      default:
+        return <File size={16} />;
+    }
+  };
+
+  // Handle file selection
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setUploadFile(file);
+      if (!uploadTitle) {
+        // Use filename without extension as default title
+        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+        setUploadTitle(nameWithoutExt);
+      }
+    }
+  };
+
+  // Handle file upload
+  const handleUpload = async () => {
+    if (!uploadFile) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      await uploadResource(DEFAULT_USER_ID, uploadFile, {
+        title: uploadTitle || uploadFile.name,
+        description: uploadDescription || undefined,
+        course_id: uploadCourseId || undefined,
+        week_number: uploadWeekNumber,
+      });
+
+      // Refresh resources list
+      await loadResources();
+
+      // Reset form and close modal
+      resetUploadForm();
+      setShowUploadModal(false);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Failed to upload file');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Reset upload form
+  const resetUploadForm = () => {
+    setUploadFile(null);
+    setUploadTitle('');
+    setUploadDescription('');
+    setUploadCourseId('');
+    setUploadWeekNumber(undefined);
+    setUploadError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle resource selection toggle
+  const toggleResourceSelection = (resourceId: number) => {
+    const newSelection = new Set(selectedResources);
+    if (newSelection.has(resourceId)) {
+      newSelection.delete(resourceId);
+    } else {
+      newSelection.add(resourceId);
+    }
+    setSelectedResources(newSelection);
+  };
+
+  // Handle viewing a resource
+  const handleViewResource = (resource: ResourceData) => {
+    setViewingResource(resource);
+  };
+
+  // Open resource in new tab
+  const openResourceInNewTab = (resource: ResourceData) => {
+    window.open(getResourceFileUrl(resource.id), '_blank');
+  };
+
+  // Download resource
+  const downloadResource = (resource: ResourceData) => {
+    window.open(getResourceFileUrl(resource.id, true), '_blank');
+  };
+
+  // Delete selected resources
+  const handleDeleteSelected = async () => {
+    if (selectedResources.size === 0) return;
+
+    if (!confirm(`Are you sure you want to delete ${selectedResources.size} resource(s)?`)) {
+      return;
+    }
+
+    try {
+      await batchDeleteResources(DEFAULT_USER_ID, Array.from(selectedResources));
+      await loadResources();
+      setSelectedResources(new Set());
+    } catch (error) {
+      console.error('Failed to delete resources:', error);
+      alert('Failed to delete some resources');
+    }
+  };
+
+  // Delete single resource
+  const handleDeleteResource = async (resourceId: number) => {
+    if (!confirm('Are you sure you want to delete this resource?')) {
+      return;
+    }
+
+    try {
+      await deleteResource(resourceId);
+      await loadResources();
+      selectedResources.delete(resourceId);
+      setSelectedResources(new Set(selectedResources));
+    } catch (error) {
+      console.error('Failed to delete resource:', error);
+      alert('Failed to delete resource');
+    }
+  };
+
+  // Get resources filtered by course and week
+  const getFilteredResources = () => {
+    let filtered = resources;
+    
+    if (selectedCourse) {
+      filtered = filtered.filter(r => r.course_id === selectedCourse);
+    }
+    
+    if (selectedWeek) {
+      filtered = filtered.filter(r => r.week_number === selectedWeek);
+    }
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(r => 
+        r.title.toLowerCase().includes(query) ||
+        r.original_filename.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  };
+
+  // Courses state - loaded from API
+  const [courses, setCourses] = useState<CourseWithUI[]>([]);
+  const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+  
+  // Course creation modal state
+  const [showCourseModal, setShowCourseModal] = useState(false);
+  const [isCreatingCourse, setIsCreatingCourse] = useState(false);
+  const [courseError, setCourseError] = useState<string | null>(null);
+  const [newCourseName, setNewCourseName] = useState('');
+  const [newCourseCode, setNewCourseCode] = useState('');
+  const [newCourseSemester, setNewCourseSemester] = useState('');
+  const [newCourseDescription, setNewCourseDescription] = useState('');
+  const [newCourseStudentCount, setNewCourseStudentCount] = useState<number>(0);
+  const [newCourseTotalWeeks, setNewCourseTotalWeeks] = useState<number>(12);
+
+  // Load courses from API
+  useEffect(() => {
+    loadCourses();
+  }, []);
+
+  const loadCourses = async () => {
+    setIsLoadingCourses(true);
+    try {
+      const data = await getCourses(DEFAULT_USER_ID);
+      setCourses(data.map(course => ({ ...course, isExpanded: false })));
+    } catch (error) {
+      console.error('Failed to load courses:', error);
+    } finally {
+      setIsLoadingCourses(false);
+    }
+  };
+
+  // Create a new course
+  const handleCreateCourse = async () => {
+    if (!newCourseName || !newCourseCode) return;
+
+    setIsCreatingCourse(true);
+    setCourseError(null);
+
+    try {
+      await createCourse(DEFAULT_USER_ID, {
+        name: newCourseName,
+        code: newCourseCode,
+        semester: newCourseSemester || undefined,
+        description: newCourseDescription || undefined,
+        student_count: newCourseStudentCount,
+        total_weeks: newCourseTotalWeeks,
+      });
+
+      // Refresh courses list
+      await loadCourses();
+
+      // Reset form and close modal
+      resetCourseForm();
+      setShowCourseModal(false);
+    } catch (error) {
+      setCourseError(error instanceof Error ? error.message : 'Failed to create course');
+    } finally {
+      setIsCreatingCourse(false);
+    }
+  };
+
+  // Reset course creation form
+  const resetCourseForm = () => {
+    setNewCourseName('');
+    setNewCourseCode('');
+    setNewCourseSemester('');
+    setNewCourseDescription('');
+    setNewCourseStudentCount(0);
+    setNewCourseTotalWeeks(12);
+    setCourseError(null);
+  };
+
+  // Delete a course
+  const handleDeleteCourse = async (courseId: number) => {
+    if (!confirm('Are you sure you want to delete this course? All resources in this course will also be deleted.')) {
+      return;
+    }
+
+    try {
+      await deleteCourse(courseId);
+      await loadCourses();
+      await loadResources();
+      if (selectedCourse === String(courseId)) {
+        setSelectedCourse(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete course:', error);
+      alert('Failed to delete course');
+    }
+  };
 
   const handleTabChange = (tab: string) => {
     setMainSidebarTab(tab);
     onNavigate(tab as Page);
   };
 
-  const toggleCourse = (courseId: string) => {
+  const toggleCourse = (courseId: number) => {
     setCourses(courses.map(course =>
       course.id === courseId
         ? { ...course, isExpanded: !course.isExpanded }
         : course
     ));
-    setSelectedCourse(courseId);
+    setSelectedCourse(String(courseId));
   };
 
-  const toggleWeek = (courseId: string, weekNumber: number) => {
-    setCourses(courses.map(course =>
-      course.id === courseId
-        ? {
-            ...course,
-            weeks: course.weeks.map(week =>
-              week.weekNumber === weekNumber
-                ? { ...week, isExpanded: !week.isExpanded }
-                : week
-            )
-          }
-        : course
-    ));
+  const selectWeek = (weekNumber: number) => {
+    setSelectedWeek(selectedWeek === weekNumber ? null : weekNumber);
   };
 
-  const toggleLectureSelection = (lectureId: string) => {
-    const newSelection = new Set(selectedLectures);
-    if (newSelection.has(lectureId)) {
-      newSelection.delete(lectureId);
-    } else {
-      newSelection.add(lectureId);
-    }
-    setSelectedLectures(newSelection);
-  };
-
-  const selectAllWeekLectures = (courseId: string, weekNumber: number) => {
-    const course = courses.find(c => c.id === courseId);
-    const week = course?.weeks.find(w => w.weekNumber === weekNumber);
-    
-    if (week) {
-      const newSelection = new Set(selectedLectures);
-      week.lectures.forEach(lecture => newSelection.add(lecture.id));
-      setSelectedLectures(newSelection);
-      setSelectedWeek(weekNumber);
-    }
+  // Get resources for selected course and week
+  const getCourseResources = (courseId: number, weekNumber?: number) => {
+    return resources.filter(r => {
+      if (r.course_id !== courseId) return false;
+      if (weekNumber !== undefined && r.week_number !== weekNumber) return false;
+      return true;
+    });
   };
 
   const generateQuiz = async () => {
-    if (selectedLectures.size === 0 || !recipientEmail) return;
+    if (selectedResources.size === 0 || !recipientEmail) return;
 
     setIsGenerating(true);
 
@@ -205,8 +379,8 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
         const azureOpenAIEndpoint = 'https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-MODEL/chat/completions?api-version=2024-02-15-preview';
         const azureOpenAIKey = 'YOUR_AZURE_OPENAI_KEY'; // Store securely!
 
-        const selectedLecturesList = Array.from(selectedLectures);
-        const course = courses.find(c => c.id === selectedCourse);
+        const _selectedResourcesList = Array.from(selectedResources);
+        const course = selectedCourse ? courses.find(c => c.id === Number(selectedCourse)) : null;
         
         // Generate quiz with Azure OpenAI
         const aiResponse = await fetch(azureOpenAIEndpoint, {
@@ -272,7 +446,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     }
     };
 
-  const getSelectedLectureCount = () => selectedLectures.size;
+  const getSelectedLectureCount = () => selectedResources.size;
 
   return (
     <div className="professor-container">
@@ -283,7 +457,11 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
         <aside className="courses-sidebar">
           <div className="courses-sidebar-header">
             <h2>My Courses</h2>
-            <button className="add-course-btn" title="Add Course">
+            <button 
+              className="add-course-btn" 
+              title="Add Course"
+              onClick={() => setShowCourseModal(true)}
+            >
               <Plus size={18} />
             </button>
           </div>
@@ -299,83 +477,80 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
           </div>
 
           <div className="courses-list">
-            {courses.map(course => (
-              <div key={course.id} className="course-item">
-                <div
-                  className={`course-header ${selectedCourse === course.id ? 'active' : ''}`}
-                  onClick={() => toggleCourse(course.id)}
+            {isLoadingCourses ? (
+              <div className="loading-courses">Loading courses...</div>
+            ) : courses.length === 0 ? (
+              <div className="no-courses">
+                <p>No courses yet</p>
+                <button 
+                  className="add-first-course-btn"
+                  onClick={() => setShowCourseModal(true)}
                 >
-                  <div className="course-header-left">
-                    {course.isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                    <BookOpen size={18} />
-                    <div className="course-info">
-                      <div className="course-name">{course.name}</div>
-                      <div className="course-code">{course.code}</div>
+                  <Plus size={16} />
+                  Add Your First Course
+                </button>
+              </div>
+            ) : (
+              courses.map(course => (
+                <div key={course.id} className="course-item">
+                  <div
+                    className={`course-header ${selectedCourse === String(course.id) ? 'active' : ''}`}
+                    onClick={() => toggleCourse(course.id)}
+                  >
+                    <div className="course-header-left">
+                      {course.isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                      <BookOpen size={18} />
+                      <div className="course-info">
+                        <div className="course-name">{course.name}</div>
+                        <div className="course-code">{course.code}</div>
+                      </div>
+                    </div>
+                    <div className="student-count">
+                      <Users size={14} />
+                      <span>{course.student_count}</span>
                     </div>
                   </div>
-                  <div className="student-count">
-                    <Users size={14} />
-                    <span>{course.studentCount}</span>
-                  </div>
-                </div>
 
-                {course.isExpanded && (
-                  <div className="weeks-list">
-                    {course.weeks.map(week => (
-                      <div key={week.weekNumber} className="week-item">
-                        <div
-                          className="week-header"
-                          onClick={() => toggleWeek(course.id, week.weekNumber)}
-                        >
-                          <div className="week-header-left">
-                            {week.isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                            <Calendar size={16} />
-                            <span>Week {week.weekNumber}</span>
-                          </div>
-                          <button
-                            className="select-week-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              selectAllWeekLectures(course.id, week.weekNumber);
-                            }}
-                            title="Select all lectures"
-                          >
-                            Select All
-                          </button>
-                        </div>
-
-                        {week.isExpanded && (
-                          <div className="lectures-list">
-                            {week.lectures.map(lecture => (
-                              <div
-                                key={lecture.id}
-                                className={`lecture-item ${selectedLectures.has(lecture.id) ? 'selected' : ''}`}
-                                onClick={() => toggleLectureSelection(lecture.id)}
-                              >
-                                <div className="lecture-checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedLectures.has(lecture.id)}
-                                    onChange={() => {}}
-                                  />
-                                </div>
-                                <FileText size={14} />
-                                <div className="lecture-info">
-                                  <div className="lecture-title">{lecture.title}</div>
-                                  <div className="lecture-meta">
-                                    {lecture.size} • {lecture.uploadDate}
-                                  </div>
-                                </div>
+                  {course.isExpanded && (
+                    <div className="weeks-list">
+                      {Array.from({ length: course.total_weeks }, (_, i) => i + 1).map(weekNum => {
+                        const weekResources = getCourseResources(course.id, weekNum);
+                        return (
+                          <div key={weekNum} className="week-item">
+                            <div
+                              className={`week-header ${selectedWeek === weekNum && selectedCourse === String(course.id) ? 'active' : ''}`}
+                              onClick={() => selectWeek(weekNum)}
+                            >
+                              <div className="week-header-left">
+                                <Calendar size={16} />
+                                <span>Week {weekNum}</span>
+                                {weekResources.length > 0 && (
+                                  <span className="week-resource-count">{weekResources.length}</span>
+                                )}
                               </div>
-                            ))}
+                            </div>
                           </div>
-                        )}
+                        );
+                      })}
+                      
+                      {/* Course actions */}
+                      <div className="course-actions">
+                        <button
+                          className="delete-course-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteCourse(course.id);
+                          }}
+                        >
+                          <Trash2 size={14} />
+                          Delete Course
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </aside>
 
@@ -387,42 +562,142 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
               <p>Manage lecture notes and generate AI-powered assessments</p>
             </div>
             <div className="professor-header-actions">
-              <button className="header-action-btn">
-                <Filter size={18} />
-                <span>Filter</span>
-              </button>
-              <button className="header-action-btn">
-                <Download size={18} />
-                <span>Export</span>
+              <button 
+                className="header-action-btn primary upload-btn-large"
+                onClick={() => setShowUploadModal(true)}
+              >
+                <Upload size={20} />
+                <span>Upload Resource</span>
               </button>
             </div>
           </div>
 
-          {getSelectedLectureCount() > 0 && (
+          {/* Resource Selection Bar */}
+          {selectedResources.size > 0 && (
             <div className="selection-bar">
               <div className="selection-info">
                 <div className="selection-count">
-                  {getSelectedLectureCount()} lecture{getSelectedLectureCount() !== 1 ? 's' : ''} selected
+                  {selectedResources.size} resource{selectedResources.size !== 1 ? 's' : ''} selected
                 </div>
                 <button
                   className="clear-selection-btn"
-                  onClick={() => setSelectedLectures(new Set())}
+                  onClick={() => setSelectedResources(new Set())}
                 >
                   Clear Selection
                 </button>
               </div>
-              <button
-                className="generate-quiz-btn"
-                onClick={() => setShowAIPanel(true)}
-              >
-                <Sparkles size={18} />
-                <span>Generate Quiz with AI</span>
-              </button>
+              <div className="selection-actions">
+                <button
+                  className="delete-selected-btn"
+                  onClick={handleDeleteSelected}
+                >
+                  <Trash2 size={18} />
+                  <span>Delete Selected</span>
+                </button>
+                <button
+                  className="generate-quiz-btn"
+                  onClick={() => setShowAIPanel(true)}
+                >
+                  <Sparkles size={18} />
+                  <span>Generate Quiz with AI</span>
+                </button>
+              </div>
             </div>
           )}
 
           <div className="professor-content">
-            {selectedCourse ? (
+            {/* Resources Grid */}
+            {getFilteredResources().length > 0 ? (
+              <div className="resources-section">
+                <div className="resources-header">
+                  <h3>
+                    {selectedCourse 
+                      ? `Resources for ${courses.find(c => c.id === Number(selectedCourse))?.name || 'Course'}`
+                      : 'All Resources'
+                    }
+                    {selectedWeek && ` - Week ${selectedWeek}`}
+                  </h3>
+                  <span className="resource-count">{getFilteredResources().length} files</span>
+                </div>
+                
+                <div className="resources-grid">
+                  {getFilteredResources().map(resource => (
+                    <div 
+                      key={resource.id} 
+                      className={`resource-card ${selectedResources.has(resource.id) ? 'selected' : ''}`}
+                    >
+                      <div className="resource-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={selectedResources.has(resource.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            toggleResourceSelection(resource.id);
+                          }}
+                        />
+                      </div>
+                      
+                      <div 
+                        className="resource-content"
+                        onClick={() => handleViewResource(resource)}
+                      >
+                        <div className={`resource-icon ${resource.file_type}`}>
+                          {getFileIcon(resource.file_type)}
+                        </div>
+                        
+                        <div className="resource-info">
+                          <div className="resource-title">{resource.title}</div>
+                          <div className="resource-meta">
+                            <span className="resource-type">{resource.file_type.toUpperCase()}</span>
+                            <span className="resource-size">{resource.file_size_formatted}</span>
+                            <span className="resource-date">{formatResourceDate(resource.created_at)}</span>
+                          </div>
+                          {resource.course_name && (
+                            <div className="resource-course">
+                              {resource.course_name}
+                              {resource.week_number && ` • Week ${resource.week_number}`}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="resource-actions">
+                        <button
+                          className="resource-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openResourceInNewTab(resource);
+                          }}
+                          title="Open in new tab"
+                        >
+                          <ExternalLink size={16} />
+                        </button>
+                        <button
+                          className="resource-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadResource(resource);
+                          }}
+                          title="Download"
+                        >
+                          <Download size={16} />
+                        </button>
+                        <button
+                          className="resource-action-btn delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteResource(resource.id);
+                          }}
+                          title="Delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : selectedCourse ? (
               <div className="course-overview">
                 <div className="overview-cards">
                   <div className="overview-card">
@@ -431,11 +706,9 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                     </div>
                     <div className="overview-stats">
                       <div className="overview-value">
-                        {courses.find(c => c.id === selectedCourse)?.weeks.reduce(
-                          (sum, week) => sum + week.lectures.length, 0
-                        )}
+                        {courses.find(c => c.id === Number(selectedCourse))?.resource_count || 0}
                       </div>
-                      <div className="overview-label">Total Lectures</div>
+                      <div className="overview-label">Total Resources</div>
                     </div>
                   </div>
 
@@ -445,7 +718,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                     </div>
                     <div className="overview-stats">
                       <div className="overview-value">
-                        {courses.find(c => c.id === selectedCourse)?.studentCount}
+                        {courses.find(c => c.id === Number(selectedCourse))?.student_count || 0}
                       </div>
                       <div className="overview-label">Enrolled Students</div>
                     </div>
@@ -456,28 +729,126 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                       <Calendar size={24} />
                     </div>
                     <div className="overview-stats">
-                      <div className="overview-value">12</div>
+                      <div className="overview-value">
+                        {courses.find(c => c.id === Number(selectedCourse))?.total_weeks || 12}
+                      </div>
                       <div className="overview-label">Weeks</div>
                     </div>
                   </div>
                 </div>
 
-                <div className="instructions-card">
-                  <h3>AI Quiz Generation</h3>
-                  <ol>
-                    <li>Select lectures from the sidebar by clicking on them</li>
-                    <li>You can select multiple lectures or use "Select All" for an entire week</li>
-                    <li>Click "Generate Quiz with AI" to create assessment questions</li>
-                    <li>Customize the quiz prompt and enter recipient email address</li>
-                    <li>The quiz will be generated and sent via Outlook email</li>
-                  </ol>
+                <div className="empty-resources">
+                  <Upload size={48} />
+                  <h3>No resources uploaded yet</h3>
+                  <p>Upload lecture materials for this course</p>
+                  <button 
+                    className="upload-btn-primary"
+                    onClick={() => {
+                      setUploadCourseId(selectedCourse);
+                      setShowUploadModal(true);
+                    }}
+                  >
+                    <Plus size={18} />
+                    Upload Resource
+                  </button>
+                </div>
+              </div>
+            ) : resources.length > 0 ? (
+              <div className="resources-section">
+                <div className="resources-header">
+                  <h3>All Resources</h3>
+                  <span className="resource-count">{resources.length} files</span>
+                </div>
+                
+                <div className="resources-grid">
+                  {resources.map(resource => (
+                    <div 
+                      key={resource.id} 
+                      className={`resource-card ${selectedResources.has(resource.id) ? 'selected' : ''}`}
+                    >
+                      <div className="resource-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={selectedResources.has(resource.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            toggleResourceSelection(resource.id);
+                          }}
+                        />
+                      </div>
+                      
+                      <div 
+                        className="resource-content"
+                        onClick={() => handleViewResource(resource)}
+                      >
+                        <div className={`resource-icon ${resource.file_type}`}>
+                          {getFileIcon(resource.file_type)}
+                        </div>
+                        
+                        <div className="resource-info">
+                          <div className="resource-title">{resource.title}</div>
+                          <div className="resource-meta">
+                            <span className="resource-type">{resource.file_type.toUpperCase()}</span>
+                            <span className="resource-size">{resource.file_size_formatted}</span>
+                            <span className="resource-date">{formatResourceDate(resource.created_at)}</span>
+                          </div>
+                          {resource.course_name && (
+                            <div className="resource-course">
+                              {resource.course_name}
+                              {resource.week_number && ` • Week ${resource.week_number}`}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="resource-actions">
+                        <button
+                          className="resource-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openResourceInNewTab(resource);
+                          }}
+                          title="Open in new tab"
+                        >
+                          <ExternalLink size={16} />
+                        </button>
+                        <button
+                          className="resource-action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadResource(resource);
+                          }}
+                          title="Download"
+                        >
+                          <Download size={16} />
+                        </button>
+                        <button
+                          className="resource-action-btn delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteResource(resource.id);
+                          }}
+                          title="Delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : (
               <div className="empty-state">
                 <FolderOpen size={64} />
-                <h3>Select a course to get started</h3>
-                <p>Choose a course from the sidebar to view lecture materials and generate quizzes</p>
+                <h3>No resources yet</h3>
+                <p>Upload lecture materials like PDFs, videos, documents, and recordings</p>
+                <button 
+                  className="upload-btn-primary"
+                  onClick={() => setShowUploadModal(true)}
+                >
+                  <Upload size={18} />
+                  Upload Your First Resource
+                </button>
               </div>
             )}
           </div>
@@ -551,7 +922,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                   <button
                     className="generate-btn"
                     onClick={generateQuiz}
-                    disabled={isGenerating || !recipientEmail || selectedLectures.size === 0}
+                    disabled={isGenerating || !recipientEmail || selectedResources.size === 0}
                   >
                     {isGenerating ? (
                       <>
@@ -562,6 +933,448 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                       <>
                         <Send size={18} />
                         <span>Generate & Send Quiz</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Upload Modal */}
+        {showUploadModal && (
+          <div className="modal-overlay" onClick={() => {
+            setShowUploadModal(false);
+            resetUploadForm();
+          }}>
+            <div className="upload-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="upload-modal-header">
+                <div className="upload-modal-title">
+                  <Upload size={24} />
+                  <h2>Upload Resource</h2>
+                </div>
+                <button
+                  className="close-modal-btn"
+                  onClick={() => {
+                    setShowUploadModal(false);
+                    resetUploadForm();
+                  }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="upload-modal-content">
+                {/* File Drop Zone */}
+                <div 
+                  className={`file-drop-zone ${uploadFile ? 'has-file' : ''}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.add('drag-over');
+                  }}
+                  onDragLeave={(e) => {
+                    e.currentTarget.classList.remove('drag-over');
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('drag-over');
+                    const file = e.dataTransfer.files[0];
+                    if (file) {
+                      setUploadFile(file);
+                      if (!uploadTitle) {
+                        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+                        setUploadTitle(nameWithoutExt);
+                      }
+                    }
+                  }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={handleFileSelect}
+                    accept=".pdf,.doc,.docx,.txt,.rtf,.odt,.ppt,.pptx,.xls,.xlsx,.mp4,.webm,.avi,.mov,.mkv,.wmv,.mp3,.wav,.ogg,.m4a,.flac,.aac,.jpg,.jpeg,.png,.gif,.webp,.svg,.zip,.rar,.7z,.tar,.gz"
+                    hidden
+                  />
+                  
+                  {uploadFile ? (
+                    <div className="file-preview">
+                      <div className="file-icon-large">
+                        {getFileIcon(uploadFile.name.split('.').pop()?.toLowerCase() || '')}
+                      </div>
+                      <div className="file-details">
+                        <div className="file-name">{uploadFile.name}</div>
+                        <div className="file-size">
+                          {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB
+                        </div>
+                      </div>
+                      <button
+                        className="remove-file-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setUploadFile(null);
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = '';
+                          }
+                        }}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload size={48} className="drop-icon" />
+                      <div className="drop-text">
+                        <span className="drop-primary">Click to upload or drag and drop</span>
+                        <span className="drop-secondary">
+                          PDF, Documents, Videos, Audio, Images (max 500MB)
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Metadata Form */}
+                <div className="upload-form">
+                  <div className="form-group">
+                    <label>Title</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Enter resource title"
+                      value={uploadTitle}
+                      onChange={(e) => setUploadTitle(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Description (Optional)</label>
+                    <textarea
+                      className="form-textarea"
+                      placeholder="Add a description..."
+                      value={uploadDescription}
+                      onChange={(e) => setUploadDescription(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Course</label>
+                      <select
+                        className="form-select"
+                        value={uploadCourseId}
+                        onChange={(e) => setUploadCourseId(e.target.value)}
+                      >
+                        <option value="">Select a course (optional)</option>
+                        {courses.map(course => (
+                          <option key={course.id} value={course.id}>
+                            {course.code} - {course.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Week Number</label>
+                      <select
+                        className="form-select"
+                        value={uploadWeekNumber || ''}
+                        onChange={(e) => setUploadWeekNumber(e.target.value ? parseInt(e.target.value) : undefined)}
+                        disabled={!uploadCourseId}
+                      >
+                        <option value="">Select week (optional)</option>
+                        {uploadCourseId && courses.find(c => c.id === Number(uploadCourseId)) && 
+                          Array.from({ length: courses.find(c => c.id === Number(uploadCourseId))?.total_weeks || 12 }, (_, i) => (
+                            <option key={i + 1} value={i + 1}>
+                              Week {i + 1}
+                            </option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {uploadError && (
+                  <div className="upload-error">
+                    <span>{uploadError}</span>
+                  </div>
+                )}
+
+                <div className="upload-modal-actions">
+                  <button
+                    className="cancel-btn"
+                    onClick={() => {
+                      setShowUploadModal(false);
+                      resetUploadForm();
+                    }}
+                    disabled={isUploading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="upload-submit-btn"
+                    onClick={handleUpload}
+                    disabled={!uploadFile || isUploading}
+                  >
+                    {isUploading ? (
+                      <>
+                        <div className="spinner" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={18} />
+                        <span>Upload Resource</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Resource Viewer Modal */}
+        {viewingResource && (
+          <div className="modal-overlay" onClick={() => setViewingResource(null)}>
+            <div className="resource-viewer-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="viewer-header">
+                <div className="viewer-title">
+                  {getFileIcon(viewingResource.file_type)}
+                  <h2>{viewingResource.title}</h2>
+                </div>
+                <div className="viewer-actions">
+                  <button
+                    className="viewer-action-btn"
+                    onClick={() => openResourceInNewTab(viewingResource)}
+                    title="Open in new tab"
+                  >
+                    <ExternalLink size={18} />
+                  </button>
+                  <button
+                    className="viewer-action-btn"
+                    onClick={() => downloadResource(viewingResource)}
+                    title="Download"
+                  >
+                    <Download size={18} />
+                  </button>
+                  <button
+                    className="close-viewer-btn"
+                    onClick={() => setViewingResource(null)}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="viewer-content">
+                {viewingResource.file_type === 'pdf' ? (
+                  <iframe
+                    src={getResourceFileUrl(viewingResource.id)}
+                    className="pdf-viewer"
+                    title={viewingResource.title}
+                  />
+                ) : viewingResource.file_type === 'video' ? (
+                  <video
+                    src={getResourceFileUrl(viewingResource.id)}
+                    controls
+                    className="video-viewer"
+                  >
+                    Your browser does not support video playback.
+                  </video>
+                ) : viewingResource.file_type === 'audio' ? (
+                  <div className="audio-viewer-container">
+                    <div className="audio-icon">
+                      <Music size={64} />
+                    </div>
+                    <div className="audio-title">{viewingResource.original_filename}</div>
+                    <audio
+                      src={getResourceFileUrl(viewingResource.id)}
+                      controls
+                      className="audio-viewer"
+                    >
+                      Your browser does not support audio playback.
+                    </audio>
+                  </div>
+                ) : viewingResource.file_type === 'image' ? (
+                  <img
+                    src={getResourceFileUrl(viewingResource.id)}
+                    alt={viewingResource.title}
+                    className="image-viewer"
+                  />
+                ) : (
+                  <div className="unsupported-viewer">
+                    <div className="unsupported-icon">
+                      {getFileIcon(viewingResource.file_type)}
+                    </div>
+                    <h3>{viewingResource.original_filename}</h3>
+                    <p>This file type cannot be previewed. Use the buttons above to open or download it.</p>
+                    <div className="file-meta">
+                      <span>{viewingResource.file_size_formatted}</span>
+                      <span>•</span>
+                      <span>{viewingResource.mime_type}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="viewer-footer">
+                <div className="viewer-meta">
+                  <span><strong>File:</strong> {viewingResource.original_filename}</span>
+                  <span><strong>Size:</strong> {viewingResource.file_size_formatted}</span>
+                  <span><strong>Uploaded:</strong> {formatResourceDate(viewingResource.created_at)}</span>
+                  {viewingResource.course_name && (
+                    <span><strong>Course:</strong> {viewingResource.course_name}</span>
+                  )}
+                  {viewingResource.week_number && (
+                    <span><strong>Week:</strong> {viewingResource.week_number}</span>
+                  )}
+                </div>
+                {viewingResource.description && (
+                  <div className="viewer-description">
+                    <strong>Description:</strong> {viewingResource.description}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Course Creation Modal */}
+        {showCourseModal && (
+          <div className="modal-overlay" onClick={() => {
+            setShowCourseModal(false);
+            resetCourseForm();
+          }}>
+            <div className="course-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="course-modal-header">
+                <div className="course-modal-title">
+                  <BookOpen size={24} />
+                  <h2>Add New Course</h2>
+                </div>
+                <button
+                  className="close-modal-btn"
+                  onClick={() => {
+                    setShowCourseModal(false);
+                    resetCourseForm();
+                  }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="course-modal-content">
+                <div className="course-form">
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Course Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., Human Computer Interaction"
+                        value={newCourseName}
+                        onChange={(e) => setNewCourseName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Course Code *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., CS 401"
+                        value={newCourseCode}
+                        onChange={(e) => setNewCourseCode(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label>Semester</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., Spring 2026"
+                        value={newCourseSemester}
+                        onChange={(e) => setNewCourseSemester(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label>Number of Students</label>
+                      <input
+                        type="number"
+                        className="form-input"
+                        placeholder="0"
+                        min="0"
+                        value={newCourseStudentCount}
+                        onChange={(e) => setNewCourseStudentCount(parseInt(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Total Weeks</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder="12"
+                      min="1"
+                      max="52"
+                      value={newCourseTotalWeeks}
+                      onChange={(e) => setNewCourseTotalWeeks(parseInt(e.target.value) || 12)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Description (Optional)</label>
+                    <textarea
+                      className="form-textarea"
+                      placeholder="Add a course description..."
+                      value={newCourseDescription}
+                      onChange={(e) => setNewCourseDescription(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                </div>
+
+                {courseError && (
+                  <div className="course-error">
+                    <span>{courseError}</span>
+                  </div>
+                )}
+
+                <div className="course-modal-actions">
+                  <button
+                    className="cancel-btn"
+                    onClick={() => {
+                      setShowCourseModal(false);
+                      resetCourseForm();
+                    }}
+                    disabled={isCreatingCourse}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="create-course-btn"
+                    onClick={handleCreateCourse}
+                    disabled={!newCourseName || !newCourseCode || isCreatingCourse}
+                  >
+                    {isCreatingCourse ? (
+                      <>
+                        <div className="spinner" />
+                        <span>Creating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={18} />
+                        <span>Create Course</span>
                       </>
                     )}
                   </button>
