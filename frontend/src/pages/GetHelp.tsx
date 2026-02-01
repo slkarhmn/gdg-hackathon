@@ -9,7 +9,13 @@ import {
     Loader2,
     AlertCircle,
     LogOut
+    User,
+    CheckCircle2,
+    Circle,
+    Sparkles,
+    X
 } from 'lucide-react';
+import { useAIChat } from '../contexts/AIChatContext';
 import './GetHelp.css';
 import { useAuth } from '../auth/AuthContext';
 
@@ -36,6 +42,8 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface GetHelpProps {
     onNavigate: (page: Page) => void;
+    viewMode?: 'student' | 'professor';
+    onViewModeToggle?: () => void;
 }
 
 const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {

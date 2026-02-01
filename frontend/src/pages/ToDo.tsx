@@ -413,7 +413,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService }) => {
 
     return (
         <div className="todo-page-container">
-            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
 
             <div className="todo-content-wrapper">
                 {/* Lists Sidebar */}

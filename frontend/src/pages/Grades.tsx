@@ -3,7 +3,6 @@ import Sidebar from '../components/layout/Sidebar';
 import {
   Plus,
   Calendar,
-  Clock,
   Tag,
   FileText,
   MessageSquare,
@@ -13,7 +12,6 @@ import {
   CheckCircle2,
   Circle,
   ChevronRight,
-  Filter,
   Search,
   BookOpen,
   Target,
@@ -29,6 +27,7 @@ import {
   createAssignment
 } from '../api';
 import { DEFAULT_USER_ID } from '../api/config';
+import { useAIChat } from '../contexts/AIChatContext';
 import type {
   BackendAssignment,
   BackendNote,
@@ -70,6 +69,8 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface GradesProps {
   onNavigate: (page: Page, options?: { openNoteId?: string; preloadedNote?: BackendNote }) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -126,7 +127,7 @@ function transformAssignment(a: BackendAssignment): Assignment {
   };
 }
 
-const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
+const Grades: React.FC<GradesProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle  }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('analytics');
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [showAddAssignment, setShowAddAssignment] = useState(false);
@@ -135,6 +136,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   const [addForm, setAddForm] = useState({ title: '', dueDate: '', course: '', weight: '10' });
   const [showGradeCalculator, setShowGradeCalculator] = useState(false);
   const [aiQuestion, setAiQuestion] = useState('');
+  const { messages: aiMessages, isLoading: aiLoading, sendMessage: sendAIMessage } = useAIChat();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'upcoming' | 'completed'>('all');
   const [loading, setLoading] = useState(true);
@@ -324,7 +326,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   if (loading) {
     return (
       <div className="grades-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="grades-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
             <p>Loading grades...</p>
@@ -756,7 +758,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
                         onChange={(e) => setAiQuestion(e.target.value)}
                         onKeyPress={(e) => {
                           if (e.key === 'Enter' && aiQuestion.trim()) {
-                            console.log('AI Question:', aiQuestion);
+                            sendAIMessage(aiQuestion.trim(), `grades:assignment:${selectedAssignment.title}`);
                             setAiQuestion('');
                           }
                         }}
@@ -765,21 +767,46 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
                         className="ai-send-btn"
                         onClick={() => {
                           if (aiQuestion.trim()) {
-                            console.log('AI Question:', aiQuestion);
+                            sendAIMessage(aiQuestion.trim(), `grades:assignment:${selectedAssignment.title}`);
                             setAiQuestion('');
                           }
                         }}
-                        disabled={!aiQuestion.trim()}
+                        disabled={!aiQuestion.trim() || aiLoading}
                       >
                         <Send size={16} />
                       </button>
                     </div>
                     <div className="ai-suggestions">
                       <span className="suggestion-label">Suggestions:</span>
-                      <button className="suggestion-chip">Explain key concepts</button>
-                      <button className="suggestion-chip">Study tips</button>
-                      <button className="suggestion-chip">Common mistakes</button>
+                      <button
+                        className="suggestion-chip"
+                        onClick={() => sendAIMessage('Explain key concepts for this assignment', `grades:assignment:${selectedAssignment.title}`)}
+                      >
+                        Explain key concepts
+                      </button>
+                      <button
+                        className="suggestion-chip"
+                        onClick={() => sendAIMessage('What study tips do you have for this assignment?', `grades:assignment:${selectedAssignment.title}`)}
+                      >
+                        Study tips
+                      </button>
+                      <button
+                        className="suggestion-chip"
+                        onClick={() => sendAIMessage('What are common mistakes to avoid?', `grades:assignment:${selectedAssignment.title}`)}
+                      >
+                        Common mistakes
+                      </button>
                     </div>
+                    {aiMessages.length > 0 && (
+                      <div className="ai-chat-responses" style={{ marginTop: 12, padding: 12, background: '#f9fafb', borderRadius: 8 }}>
+                        {aiMessages.map((msg, idx) => (
+                          <div key={idx} style={{ marginBottom: 8 }}>
+                            <strong>{msg.role === 'user' ? 'You' : 'AI'}:</strong> {msg.text}
+                          </div>
+                        ))}
+                        {aiLoading && <div style={{ opacity: 0.7 }}>Thinking...</div>}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

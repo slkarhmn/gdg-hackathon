@@ -31,6 +31,8 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface CalendarProps {
   onNavigate: (page: Page) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 function assignmentPriority(dueDate: string): 'high' | 'medium' | 'low' {
@@ -361,7 +363,12 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
 
   return (
     <div className="calendar-container">
-      <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} />
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={handleTabChange}
+        viewMode={viewMode}
+        onViewModeToggle={onViewModeToggle}
+      />
       
       <main className="calendar-main">
         <Header userName="Saachi" />

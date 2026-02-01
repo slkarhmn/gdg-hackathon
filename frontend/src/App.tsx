@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { useGraphService } from './auth/graphService';
+import { AIChatProvider } from './contexts/AIChatContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Notes from './pages/Notes';
@@ -29,13 +30,11 @@ function AppContent() {
   const { isAuthenticated, isLoading, account, getAccessToken, login } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [notesPreloadedNote, setNotesPreloadedNote] = useState<BackendNote | null>(null);
+  const [viewMode, setViewMode] = useState<'student' | 'professor'>('student');
   
   // Persist note tabs across navigation
   const [notesOpenTabs, setNotesOpenTabs] = useState<OpenTab[]>([]);
   const [notesActiveTabId, setNotesActiveTabId] = useState<string>('');
-  
-  // Check if user is professor/admin
-  const isProfessor = true;
 
   // Get access token when user is authenticated
   useEffect(() => {
@@ -51,6 +50,16 @@ function AppContent() {
   // Initialize Graph Service
   const graphService = useGraphService(accessToken);
 
+  // When switching to professor view, go to professor page
+  // When switching to student view, go to dashboard
+  useEffect(() => {
+    if (viewMode === 'professor') {
+      setCurrentPage('professor');
+    } else if (currentPage === 'professor') {
+      setCurrentPage('dashboard');
+    }
+  }, [viewMode]);
+
   const handleNavigate = (page: string, options?: NavigateOptions) => {
     setCurrentPage(page);
     if (page === 'notes' && options?.preloadedNote != null) {
@@ -58,6 +67,10 @@ function AppContent() {
     } else {
       setNotesPreloadedNote(null);
     }
+  };
+
+  const handleViewModeToggle = () => {
+    setViewMode(prev => prev === 'student' ? 'professor' : 'student');
   };
 
   // Callbacks to sync Notes tab state with App
@@ -112,6 +125,8 @@ function AppContent() {
     const pageProps = {
       graphService,
       userProfile: account,
+      viewMode,
+      onViewModeToggle: handleViewModeToggle,
     };
 
     switch (currentPage) {
@@ -149,7 +164,11 @@ function AppContent() {
     }
   };
 
-  return <div className="App">{renderPage()}</div>;
+  return (
+    <AIChatProvider>
+      <div className="App">{renderPage()}</div>
+    </AIChatProvider>
+  );
 }
 
 // Root App with AuthProvider

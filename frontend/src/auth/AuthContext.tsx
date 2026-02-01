@@ -5,7 +5,9 @@ import { msalConfig, loginRequest } from './authConfig';
 interface AuthContextType {
   account: any | null;
   isAuthenticated: boolean;
+  isGuest: boolean;
   login: () => Promise<void>;
+  loginAsGuest: () => void;
   logout: () => void;
   getAccessToken: () => Promise<string | null>;
   isLoading: boolean;
@@ -16,13 +18,24 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Initialize MSAL instance
 const msalInstance = new PublicClientApplication(msalConfig);
 
+const GUEST_ACCOUNT_KEY = 'studysync_guest_mode';
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [account, setAccount] = useState<any>(null);
+  const [isGuest, setIsGuest] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const initialize = async () => {
       try {
+        const guestMode = sessionStorage.getItem(GUEST_ACCOUNT_KEY);
+        if (guestMode === 'true') {
+          setIsGuest(true);
+          setAccount({ name: 'Guest User', username: 'guest@studysync.local' });
+          setIsLoading(false);
+          return;
+        }
+
         await msalInstance.initialize();
         
         // Handle redirect response (important!)
@@ -63,18 +76,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginAsGuest = () => {
+    sessionStorage.setItem(GUEST_ACCOUNT_KEY, 'true');
+    setIsGuest(true);
+    setAccount({ name: 'Guest User', username: 'guest@studysync.local' });
+  };
+
   const logout = () => {
-    // ✅ NEW: Clear token from localStorage on logout
-    localStorage.removeItem('microsoft_access_token');
-    localStorage.removeItem('microsoft_refresh_token');
-    
-    msalInstance.logoutRedirect({
-      account: account,
-    });
+    if (isGuest) {
+      sessionStorage.removeItem(GUEST_ACCOUNT_KEY);
+      setIsGuest(false);
+      setAccount(null);
+    } else {
+      msalInstance.logoutRedirect({
+        account: account,
+      });
+    }
   };
 
   const getAccessToken = async (): Promise<string | null> => {
-    if (!account) return null;
+    if (!account || isGuest) return null;
 
     try {
       // acquireTokenSilent will throw InteractionRequiredAuthError if the
@@ -117,7 +138,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value = {
     account,
     isAuthenticated: !!account,
+    isGuest,
     login,
+    loginAsGuest,
     logout,
     getAccessToken,
     isLoading,

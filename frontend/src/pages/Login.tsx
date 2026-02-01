@@ -3,12 +3,8 @@ import { useAuth } from '../auth/AuthContext';
 import { Loader2, BookOpen, Brain, Calendar, Users, Sparkles, TrendingUp } from 'lucide-react';
 import './Login.css';
 
-interface LoginProps {
-  onNavigate: (page: string) => void;
-}
-
-const Login: React.FC<LoginProps> = ({ onNavigate }) => {
-  const { login, isLoading } = useAuth();
+const Login: React.FC = () => {
+  const { login, loginAsGuest, isLoading } = useAuth();
   const [error, setError] = React.useState<string | null>(null);
 
   const handleLogin = async () => {
@@ -122,32 +118,19 @@ const Login: React.FC<LoginProps> = ({ onNavigate }) => {
               </div>
             )}
 
-            <button
-              className="microsoft-login-btn"
-              onClick={handleLogin}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 size={20} className="spinner" />
-                  <span>Signing in...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="microsoft-icon" width="21" height="21" viewBox="0 0 21 21">
-                    <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
-                    <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
-                    <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
-                    <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
-                  </svg>
-                  <span>Sign in with Microsoft</span>
-                </>
-              )}
-            </button>
+          <button
+            className="guest-login-btn"
+            onClick={loginAsGuest}
+            disabled={isLoading}
+            type="button"
+          >
+            Continue as guest
+          </button>
 
-            <div className="login-divider">
-              <span>or</span>
-            </div>
+          <p className="login-info">
+            Sign in with your university Microsoft account or continue as guest to explore
+          </p>
+        </div>
 
             <button 
               className="pricing-link" 

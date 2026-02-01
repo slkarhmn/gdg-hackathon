@@ -24,7 +24,8 @@ import {
 import './Notes.css';
 import { fetchNotes, createNote, updateNote, fetchTagNames, fetchSpacedRepetitions, recordNoteReview, removeNoteFromSpacedRepetition } from '../api';
 import type { BackendNote } from '../api';
-import { DEFAULT_USER_ID } from '../api/config';
+import { DEFAULT_USER_ID, API_BASE_URL } from '../api/config';
+import { useAIChat } from '../contexts/AIChatContext';
 
 interface Note {
   id: string;
@@ -58,6 +59,8 @@ interface NotesProps {
   persistedActiveTabId?: string;
   onTabsChange?: (tabs: OpenTab[]) => void;
   onActiveTabChange?: (tabId: string) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -99,7 +102,7 @@ function extractNoteContent(note: BackendNote): string {
 // Transform backend notes to folder structure grouped by subject
 function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
   const folderMap = new Map<string, Note[]>();
-  
+
   notes.forEach(note => {
     const subject = note.subject || 'Uncategorized';
     if (!folderMap.has(subject)) {
@@ -115,7 +118,7 @@ function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
 
   const folders: LectureFolder[] = [];
   let index = 1;
-  
+
   folderMap.forEach((folderNotes, folderName) => {
     folders.push({
       id: index.toString(),
@@ -136,7 +139,9 @@ const Notes: React.FC<NotesProps> = ({
   persistedOpenTabs,
   persistedActiveTabId,
   onTabsChange,
-  onActiveTabChange
+  onActiveTabChange,
+  viewMode = 'student', 
+  onViewModeToggle 
 }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('notes');
   const [folders, setFolders] = useState<LectureFolder[]>([]);
@@ -156,9 +161,11 @@ const Notes: React.FC<NotesProps> = ({
 
         const notesData = await fetchNotes();
         setAllNotesData(notesData);
-        
+
         // Group notes into folders by subject
         const groupedFolders = groupNotesIntoFolders(notesData);
+
+        // If no notes from API, use placeholder folders
         
         // If no notes from API, use placeholder folders (but don't auto-open any note)
         if (groupedFolders.length === 0) {
@@ -178,14 +185,19 @@ const Notes: React.FC<NotesProps> = ({
             }
           ];
           setFolders(placeholderFolders);
-          
-          // Don't auto-open any note - start with empty state
-          // Only open a note when a preloaded note is passed (e.g. from Grades or Dashboard)
+
+          // Set initial tab
+          setOpenTabs([{ id: 'placeholder-1', title: 'Welcome to Notes', folderId: '1' }]);
+          setActiveTabId('placeholder-1');
         } else {
           setFolders(groupedFolders);
-          
-          // Don't auto-open the first note - only open when explicitly clicked
-          // or when a preloaded note is passed from another page
+
+          // Set initial tab to first note of first folder
+          if (groupedFolders[0]?.notes[0]) {
+            const firstNote = groupedFolders[0].notes[0];
+            setOpenTabs([{ id: firstNote.id, title: firstNote.title, folderId: groupedFolders[0].id }]);
+            setActiveTabId(firstNote.id);
+          }
         }
       } catch (err) {
         console.error('Failed to load notes:', err);
@@ -215,8 +227,8 @@ const Notes: React.FC<NotesProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [notesSidebarCollapsed, setNotesSidebarCollapsed] = useState(false);
   const [showAIChat, setShowAIChat] = useState(false);
-  const [aiMessages, setAIMessages] = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
   const [aiInput, setAIInput] = useState('');
+  const { messages: aiMessages, isLoading: aiLoading, sendMessage: sendAIMessage, endSession: endAISession } = useAIChat();
   const [selectedText, setSelectedText] = useState('');
   const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null);
   const [spacedRepNoteIds, setSpacedRepNoteIds] = useState<Set<number>>(new Set());
@@ -229,6 +241,13 @@ const Notes: React.FC<NotesProps> = ({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorTitleRef = useRef('');
   const editorBodyRef = useRef('');
+  // --- AI-powered summary & export states ---
+  const [aiSummary, setAISummary] = useState('');
+  const [aiQuestions, setAIQuestions] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingAI, setIsSavingAI] = useState(false);
+
+
 
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -511,39 +530,32 @@ const Notes: React.FC<NotesProps> = ({
     }
   };
 
+  const getCurrentNoteContext = useCallback(() => {
+    const title = editorTitleRef.current || editorTitle;
+    const body = editorBodyRef.current || editorBody;
+    return (title ? `# ${title}\n\n` : '') + (body || '');
+  }, [editorTitle, editorBody]);
+
   const askAIAboutSelection = () => {
     if (selectedText) {
       setShowAIChat(true);
-      setAIMessages([
-        ...aiMessages,
-        { role: 'user', text: `Can you explain this: "${selectedText}"` }
-      ]);
+      const question = `Can you explain this: "${selectedText}"`;
+      sendAIMessage(question, 'notes', getCurrentNoteContext());
       setSelectedText('');
       setSelectionPosition(null);
-
-      // Simulate AI response
-      setTimeout(() => {
-        setAIMessages(prev => [
-          ...prev,
-          { role: 'ai', text: `I'd be happy to explain "${selectedText}"! This concept relates to the principles of user interface design...` }
-        ]);
-      }, 1000);
     }
   };
 
-  const sendAIMessage = () => {
+  const handleSendAIMessage = () => {
     if (aiInput.trim()) {
-      setAIMessages([...aiMessages, { role: 'user', text: aiInput }]);
+      sendAIMessage(aiInput.trim(), 'notes', getCurrentNoteContext());
       setAIInput('');
-
-      // Simulate AI response
-      setTimeout(() => {
-        setAIMessages(prev => [
-          ...prev,
-          { role: 'ai', text: 'I understand your question. Let me help you with that...' }
-        ]);
-      }, 1000);
     }
+  };
+
+  const handleCloseAIChat = () => {
+    endAISession(); // Saves context to backend for future sessions
+    setShowAIChat(false);
   };
 
   useEffect(() => {
@@ -590,12 +602,12 @@ const Notes: React.FC<NotesProps> = ({
                       {note.tags && note.tags.length > 0 && (
                         <div style={{ display: 'flex', gap: '4px', marginTop: '2px', flexWrap: 'wrap' }}>
                           {note.tags.slice(0, 3).map((tag, idx) => (
-                            <span 
-                              key={idx} 
-                              style={{ 
-                                fontSize: '0.65rem', 
-                                backgroundColor: '#e5e7eb', 
-                                padding: '1px 4px', 
+                            <span
+                              key={idx}
+                              style={{
+                                fontSize: '0.65rem',
+                                backgroundColor: '#e5e7eb',
+                                padding: '1px 4px',
                                 borderRadius: '3px',
                                 color: '#4b5563'
                               }}
@@ -825,7 +837,7 @@ const Notes: React.FC<NotesProps> = ({
   if (loading) {
     return (
       <div className="notes-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="notes-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%' }}>
             <p>Loading notes...</p>
@@ -841,11 +853,11 @@ const Notes: React.FC<NotesProps> = ({
 
       <div className="notes-content-wrapper">
         {error && (
-          <div style={{ 
-            padding: '1rem', 
-            backgroundColor: '#fee2e2', 
-            color: '#991b1b', 
-            borderRadius: '8px', 
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#fee2e2',
+            color: '#991b1b',
+            borderRadius: '8px',
             margin: '1rem',
             position: 'absolute',
             top: 0,
@@ -856,7 +868,7 @@ const Notes: React.FC<NotesProps> = ({
             {error}
           </div>
         )}
-        
+
         {/* Collapsible Notes Sidebar */}
         <aside className={`notes-sidebar ${notesSidebarCollapsed ? 'collapsed' : ''}`}>
           {!notesSidebarCollapsed && (
@@ -1085,11 +1097,11 @@ const Notes: React.FC<NotesProps> = ({
                 )}
               </>
             ) : (
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
                 height: '50vh',
                 color: '#6b7280'
               }}>
@@ -1129,7 +1141,7 @@ const Notes: React.FC<NotesProps> = ({
             </div>
           )}
 
-          {/* AI Chat Panel */}
+                    {/* AI Chat Panel */}
           {showAIChat && (
             <div className="ai-chat-panel">
               <div className="ai-chat-header">
@@ -1139,24 +1151,31 @@ const Notes: React.FC<NotesProps> = ({
                 </div>
                 <button
                   className="ai-close-btn"
-                  onClick={() => setShowAIChat(false)}
+                  onClick={handleCloseAIChat}
                 >
                   <X size={18} />
                 </button>
               </div>
 
               <div className="ai-chat-messages">
-                {aiMessages.length === 0 ? (
+                {aiMessages.length === 0 && !aiLoading ? (
                   <div className="ai-empty-state">
                     <Sparkles size={32} />
                     <p>Ask me anything about this note!</p>
                   </div>
                 ) : (
-                  aiMessages.map((msg, idx) => (
-                    <div key={idx} className={`ai-message ${msg.role}`}>
-                      <div className="message-content">{msg.text}</div>
-                    </div>
-                  ))
+                  <>
+                    {aiMessages.map((msg, idx) => (
+                      <div key={idx} className={`ai-message ${msg.role}`}>
+                        <div className="message-content">{msg.text}</div>
+                      </div>
+                    ))}
+                    {aiLoading && (
+                      <div className="ai-message ai">
+                        <div className="message-content" style={{ opacity: 0.7 }}>Thinking...</div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -1166,15 +1185,107 @@ const Notes: React.FC<NotesProps> = ({
                   placeholder="Ask a question..."
                   value={aiInput}
                   onChange={(e) => setAIInput(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && sendAIMessage()}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendAIMessage()}
+                  disabled={aiLoading}
                 />
                 <button
                   className="ai-send-btn"
-                  onClick={sendAIMessage}
-                  disabled={!aiInput.trim()}
+                  onClick={handleSendAIMessage}
+                  disabled={!aiInput.trim() || aiLoading}
                 >
                   <Send size={18} />
                 </button>
+              </div>
+
+              {/* AI summary + export */}
+              <div className="ai-generate-section">
+                <button
+                  className="ai-generate-btn"
+                  disabled={isGenerating || !activeNote || activeNote.id.startsWith('placeholder')}
+                  onClick={async () => {
+                    if (!activeNote || activeNote.id.startsWith('placeholder')) return;
+                    setIsGenerating(true);
+                    try {
+                      const res = await fetch(
+                        `${API_BASE_URL}/users/${DEFAULT_USER_ID}/generate-ai-note`,
+                        {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ note_id: parseInt(activeNote.id, 10) }),
+                        }
+                      );
+                      if (res.ok) {
+                        const data = await res.json();
+                        const summary = data.summary || '';
+                        const questions = data.questions || data.exam_questions || '';
+                        const appendText = `\n\n## Summary\n${summary}\n\n## Possible Exam Questions\n${questions}`;
+                        const newBody = (editorBodyRef.current || editorBody || '') + appendText;
+                        const noteId = parseInt(activeNote.id, 10);
+                        await updateNote(noteId, {
+                          content: {
+                            title: editorTitleRef.current || 'Untitled Note',
+                            body: newBody,
+                            summary,
+                            questions,
+                          },
+                        });
+                        setEditorBody(newBody);
+                        editorBodyRef.current = newBody;
+                        setFolders((prev) =>
+                          prev.map((folder) => ({
+                            ...folder,
+                            notes: folder.notes.map((n) =>
+                              n.id === activeNote.id ? { ...n, content: newBody } : n
+                            ),
+                          }))
+                        );
+                        setAISummary(summary);
+                        setAIQuestions(questions);
+                      } else {
+                        alert('Failed to generate summary');
+                      }
+                    } catch (err) {
+                      console.error('Generate notes failed:', err);
+                      alert('Failed to generate and save notes');
+                    } finally {
+                      setIsGenerating(false);
+                    }
+                  }}
+                >
+                  <Sparkles size={16} />
+                  {isGenerating ? 'Generating...' : 'Generate lecture notes'}
+                </button>
+
+                {(aiSummary || aiQuestions) && (
+                  <div className="ai-generated-preview">
+                    <h3>Generated</h3>
+                    <p className="ai-generated-hint">Summary and questions have been added to your note above.</p>
+                    <div className="ai-export-buttons">
+                      <button
+                        className="ai-export-btn"
+                        onClick={() =>
+                          window.open(
+                            `${API_BASE_URL}/notes/${activeNote?.id}/export?format=pdf`,
+                            '_blank'
+                          )
+                        }
+                      >
+                        Export PDF
+                      </button>
+                      <button
+                        className="ai-export-btn"
+                        onClick={() =>
+                          window.open(
+                            `${API_BASE_URL}/notes/${activeNote?.id}/export?format=docx`,
+                            '_blank'
+                          )
+                        }
+                      >
+                        Export DOCX
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
