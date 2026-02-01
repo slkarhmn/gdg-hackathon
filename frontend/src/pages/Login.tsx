@@ -3,7 +3,11 @@ import { useAuth } from '../auth/AuthContext';
 import { Loader2, BookOpen, Brain, Calendar, Users, Sparkles, TrendingUp } from 'lucide-react';
 import './Login.css';
 
-const Login: React.FC = () => {
+interface LoginProps {
+  onNavigate?: (page: string) => void;
+}
+
+const Login: React.FC<LoginProps> = ({ onNavigate = () => {} }) => {
   const { login, loginAsGuest, isLoading } = useAuth();
   const [error, setError] = React.useState<string | null>(null);
 
@@ -84,7 +88,7 @@ const Login: React.FC = () => {
                 <span>Powered by Azure AI</span>
               </div>
               <div className="trust-item">
-                <span className="security-badge">ðŸ”’ Secure Microsoft Login</span>
+                <span className="security-badge">🔒 Secure Microsoft Login</span>
               </div>
             </div>
           </div>
@@ -118,19 +122,61 @@ const Login: React.FC = () => {
               </div>
             )}
 
-          <button
-            className="guest-login-btn"
-            onClick={loginAsGuest}
-            disabled={isLoading}
-            type="button"
-          >
-            Continue as guest
-          </button>
+            <button
+              className="login-btn"
+              onClick={handleLogin}
+              disabled={isLoading}
+              type="button"
+              style={{
+                backgroundColor: '#000',
+                color: '#fff',
+                padding: '14px 24px',
+                fontSize: '16px',
+                fontWeight: '500',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                width: '100%',
+                marginBottom: '12px',
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                if (!isLoading) e.currentTarget.style.backgroundColor = '#1a1a1a';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#000';
+              }}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="spinner" size={20} />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="20" height="20" viewBox="0 0 21 21" fill="none">
+                    <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+                    <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+                    <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+                    <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                  </svg>
+                  <span>Sign in with Microsoft</span>
+                </>
+              )}
+            </button>
 
-          <p className="login-info">
-            Sign in with your university Microsoft account or continue as guest to explore
-          </p>
-        </div>
+            <button
+              className="guest-login-btn"
+              onClick={loginAsGuest}
+              disabled={isLoading}
+              type="button"
+            >
+              Continue as guest
+            </button>
 
             <button 
               className="pricing-link" 

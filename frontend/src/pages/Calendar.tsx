@@ -22,9 +22,6 @@ import { DEFAULT_USER_ID, API_BASE_URL } from '../api/config';
 import { useAuth } from '../auth/AuthContext';
 import { GraphService } from '../auth/graphService';
 import { AiChatAPI, type ChatMessage, type StudyPlan } from '../api/ai';
-import { DEFAULT_USER_ID } from '../api/config';
-import { useAuth } from '../auth/AuthContext';
-import { GraphService } from '../auth/graphService';
 import './Calendar.css';
 
 // ===========================================================================
@@ -87,6 +84,15 @@ interface StudyPlanJSON {
     totalStudyMinutes: number;
     totalBreakMinutes: number;
   };
+}
+
+interface OutlookEvent {
+  id?: string;
+  subject?: string;
+  start?: { dateTime?: string; timeZone?: string };
+  end?: { dateTime?: string; timeZone?: string };
+  location?: { displayName?: string };
+  isCancelledEvent?: boolean;
 }
 
 // ===========================================================================
@@ -166,41 +172,12 @@ function studyPlanToCalendarEvents(plan: StudyPlanResponse | null): CalendarEven
   return events;
 }
 
-// ---------------------------------------------------------------------------
-// Outlook event → CalendarEvent
-// ---------------------------------------------------------------------------
-// The Graph API returns each event with a nested start/end object like:
-//   { dateTime: "2025-02-15T14:00:00", timeZone: "Eastern Standard Time" }
-// We parse the dateTime string directly (it has no timezone offset, so it is
-// already in the user's local calendar time) to extract the date and display
-// time without any unintended timezone shift.
-// ---------------------------------------------------------------------------
-
-interface OutlookEvent {
-  id?: string;
-  subject?: string;
-  start?: { dateTime?: string; timeZone?: string };
-  end?: { dateTime?: string; timeZone?: string };
-  location?: { displayName?: string };
-  isCancelledEvent?: boolean;
-}
-
 function outlookEventsToCalendarEvents(outlookEvents: Record<string, unknown>[]): CalendarEvent[] {
   return (outlookEvents as OutlookEvent[])
     .filter((e) => e.start?.dateTime && e.subject)
     .map((e) => {
       const rawDateTime = e.start!.dateTime!;
       const datePart = rawDateTime.slice(0, 10);
-    .filter((e) => e.start?.dateTime && e.subject) // skip malformed entries
-    .map((e) => {
-      // dateTime from Graph looks like "2025-02-15T14:00:00.0000000"
-      // Slice to the first 10 chars for the date, parse the time portion manually
-      // so we never hand an ambiguous string to `new Date()` which would apply
-      // the local-zone offset and shift the time.
-      const rawDateTime = e.start!.dateTime!;
-      const datePart = rawDateTime.slice(0, 10); // "2025-02-15"
-
-      // Time portion: everything after the T, e.g. "14:00:00.0000000"
       const timePortion = rawDateTime.slice(11);
       const [hStr = '0', mStr = '0'] = timePortion.split(':');
       const h = parseInt(hStr, 10);
@@ -209,12 +186,6 @@ function outlookEventsToCalendarEvents(outlookEvents: Record<string, unknown>[])
       const hour = h % 12 || 12;
       const displayTime = `${hour}:${m.toString().padStart(2, '0')} ${period}`;
       const priority = assignmentPriority(datePart + 'T00:00:00');
-
-      // Derive priority the same way assignments do: distance from today.
-      const priority = assignmentPriority(datePart + 'T00:00:00');
-
-      // Use the calendar name or location as the "subject" line shown under
-      // the title. Fall back to a generic label.
       const subject = e.location?.displayName || 'Outlook Calendar';
 
       return {
@@ -297,7 +268,6 @@ async function addToOutlook(
   return response.id;
 }
 
-// Convert generated StudyPlanJSON to CalendarEvent[] so it can render on the calendar grid
 function studyPlanJSONToCalendarEvents(plan: StudyPlanJSON): CalendarEvent[] {
   return plan.plan
     .filter((p) => p.type === 'study')
@@ -323,7 +293,7 @@ function studyPlanJSONToCalendarEvents(plan: StudyPlanJSON): CalendarEvent[] {
 }
 
 // ===========================================================================
-// StudyBotPanel component - UPDATED (adds Customize + Save to Outlook)
+// StudyBotPanel component
 // ===========================================================================
 
 interface StudyBotPanelProps {
@@ -395,7 +365,6 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
     setUploadedFiles((prev) => [...prev, ...newFiles]);
 
     if (newFiles.length > 0) {
-      // IMPORTANT: use local list to avoid stale state
       await parseFiles([...uploadedFiles, ...newFiles]);
     }
   };
@@ -480,8 +449,6 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
 
       const plan: StudyPlanJSON = await res.json();
       setGeneratedPlanJSON(plan);
-
-      // Push into parent calendar grid (optional but we wired it in)
       onPlanGenerated?.(plan);
 
       const breakCount = plan.plan.filter((p) => p.type === 'break').length;
@@ -563,9 +530,7 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
       if (!token) throw new Error('Failed to get access token');
 
       const graphService = new GraphService(token);
-
       const studySessions = generatedPlanJSON.plan.filter((p) => p.type === 'study');
-
       const toGraphDateTime = (d: Date) => d.toISOString().slice(0, 19);
 
       let created = 0;
@@ -861,31 +826,7 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
 // Main Calendar Component
 // ===========================================================================
 
-      };
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Helper: build an ISO date string for the Graph API $filter.
-// We fetch a generous window (today − 1 day  →  today + 60 days) so the
-// calendar has data for the current month and the next one without extra calls.
-// ---------------------------------------------------------------------------
-function buildOutlookDateRange(): { startDate: string; endDate: string } {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(start.getDate() - 1); // include yesterday in case of timezone edge cases
-
-  const end = new Date(now);
-  end.setDate(end.getDate() + 60);
-
-  // Graph expects ISO 8601 without offset for the $filter on start/end dateTime
-  const toISO = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T00:00:00`;
-
-  return { startDate: toISO(start), endDate: toISO(end) };
-}
-
-const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
+const Calendar: React.FC<CalendarProps> = ({ onNavigate, viewMode, onViewModeToggle }) => {
   const [activeTab, setActiveTab] = useState('calendar');
   const today = new Date();
   const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
@@ -899,9 +840,6 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
 
   const { isAuthenticated, getAccessToken } = useAuth();
 
-  // Pull auth state so we can request an access token for Graph API.
-  const { isAuthenticated, getAccessToken } = useAuth();
-
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     onNavigate(tab as Page);
@@ -912,15 +850,6 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
     setLoading(true);
     setError(null);
 
-    const fetchOutlookEvents = async (): Promise<CalendarEvent[]> => {
-      if (!isAuthenticated) return [];
-      const token = await getAccessToken();
-      if (!token) return [];
-    // ---------------------------------------------------------------------------
-    // Fetch Outlook events only when the user is authenticated.
-    // If they haven't signed in, this simply resolves to an empty array so the
-    // rest of the calendar (assignments, study plan) still works fine.
-    // ---------------------------------------------------------------------------
     const fetchOutlookEvents = async (): Promise<CalendarEvent[]> => {
       if (!isAuthenticated) return [];
 
@@ -937,15 +866,12 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
       fetchAssignments(DEFAULT_USER_ID),
       fetchStudyPlan(DEFAULT_USER_ID),
       fetchOutlookEvents(),
-      fetchOutlookEvents(),                // ← new: Outlook sync
     ])
       .then(([assignments, studyPlan, outlookEvents]) => {
         if (cancelled) return;
         setRawAssignments(assignments);
         const assignmentEvents = assignmentsToCalendarEvents(assignments);
         const studyEvents = studyPlanToCalendarEvents(studyPlan ?? null);
-        // Merge all three sources. Outlook events are appended last; the
-        // upcoming-events list is sorted by date afterward so order doesn't matter.
         setEvents([...assignmentEvents, ...studyEvents, ...outlookEvents]);
       })
       .catch((err) => {
@@ -957,7 +883,6 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
 
     return () => { cancelled = true; };
   }, [isAuthenticated, getAccessToken]);
-  }, [isAuthenticated]); // re-run when auth state changes (e.g. after login)
 
   const handleAddToOutlook = async (event: CalendarEvent) => {
     if (!isAuthenticated) {
@@ -1098,8 +1023,6 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
 
   return (
     <div className="calendar-container">
-      <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} />
-
       <Sidebar 
         activeTab={activeTab} 
         setActiveTab={handleTabChange}

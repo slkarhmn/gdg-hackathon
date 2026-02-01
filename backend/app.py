@@ -1954,9 +1954,6 @@ class HealthCheck(RestxResource):
 # API ENDPOINTS - AI NOTES GENERATION
 # =============================================================================
 
-print("OPENAI_API_KEY is:", os.environ.get("OPENAI_API_KEY"))
-
-
 # @app.route('/api/users/<int:user_id>/generate-ai-note', methods=['POST'])
 # def generate_ai_note(user_id):
 #     data = request.get_json()

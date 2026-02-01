@@ -2,7 +2,7 @@
 
 import os
 import json
-import openai
+from openai import OpenAI  # Updated import
 import tempfile
 from docx import Document
 from fpdf import FPDF
@@ -17,8 +17,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Set OpenAI API key
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+# Initialize OpenAI client (matching ai_chat.py pattern)
+client = None
+
+def initialize_openai():
+    """Initialize OpenAI client with API key from environment"""
+    global client
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not found in environment variables")
+    client = OpenAI(api_key=api_key)
 
 
 def extract_text_from_note(note):
@@ -50,6 +58,10 @@ def generate_summary_and_questions(text):
     """
     Calls OpenAI to generate summary notes and exam-style questions.
     """
+    # Initialize client if not already done
+    if not client:
+        initialize_openai()
+    
     print(text)
     if not text.strip():
         logger.warning("Empty lecture text received for AI generation")
@@ -70,7 +82,8 @@ def generate_summary_and_questions(text):
     try:
         logger.info("Calling OpenAI ChatCompletion API")
 
-        response = openai.ChatCompletion.create(
+        # Updated to use new API syntax
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=800,
@@ -79,6 +92,7 @@ def generate_summary_and_questions(text):
 
         logger.info("OpenAI response received successfully")
 
+        # Updated to access response content
         result = response.choices[0].message.content
 
     except Exception as e:
@@ -153,4 +167,3 @@ def export_note_as_pdf(note, summary, questions):
     except Exception:
         logger.exception("PDF export failed")
         raise
-
