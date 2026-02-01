@@ -3,7 +3,6 @@ import Sidebar from '../components/layout/Sidebar';
 import {
   Plus,
   Calendar,
-  Clock,
   Tag,
   FileText,
   MessageSquare,
@@ -13,7 +12,6 @@ import {
   CheckCircle2,
   Circle,
   ChevronRight,
-  Filter,
   Search,
   BookOpen,
   Target,
@@ -70,6 +68,8 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface GradesProps {
   onNavigate: (page: Page, options?: { openNoteId?: string; preloadedNote?: BackendNote }) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -126,7 +126,7 @@ function transformAssignment(a: BackendAssignment): Assignment {
   };
 }
 
-const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
+const Grades: React.FC<GradesProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle  }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('analytics');
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [showAddAssignment, setShowAddAssignment] = useState(false);
@@ -324,7 +324,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   if (loading) {
     return (
       <div className="grades-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="grades-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
             <p>Loading grades...</p>

@@ -26,13 +26,11 @@ function AppContent() {
   const { isAuthenticated, isLoading, account, getAccessToken } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [notesPreloadedNote, setNotesPreloadedNote] = useState<BackendNote | null>(null);
+  const [viewMode, setViewMode] = useState<'student' | 'professor'>('student');
   
   // Persist note tabs across navigation
   const [notesOpenTabs, setNotesOpenTabs] = useState<OpenTab[]>([]);
   const [notesActiveTabId, setNotesActiveTabId] = useState<string>('');
-  
-  // Check if user is professor/admin (you can customize this logic)
-  const isProfessor = true; // Set to true for demo, or check account.jobTitle, account.roles, etc.
 
   // Get access token when user is authenticated
   useEffect(() => {
@@ -48,6 +46,16 @@ function AppContent() {
   // Initialize Graph Service
   const graphService = useGraphService(accessToken);
 
+  // When switching to professor view, go to professor page
+  // When switching to student view, go to dashboard
+  useEffect(() => {
+    if (viewMode === 'professor') {
+      setCurrentPage('professor');
+    } else if (currentPage === 'professor') {
+      setCurrentPage('dashboard');
+    }
+  }, [viewMode]);
+
   const handleNavigate = (page: string, options?: NavigateOptions) => {
     setCurrentPage(page);
     if (page === 'notes' && options?.preloadedNote != null) {
@@ -55,6 +63,10 @@ function AppContent() {
     } else {
       setNotesPreloadedNote(null);
     }
+  };
+
+  const handleViewModeToggle = () => {
+    setViewMode(prev => prev === 'student' ? 'professor' : 'student');
   };
 
   // Callbacks to sync Notes tab state with App
@@ -104,6 +116,8 @@ function AppContent() {
     const pageProps = {
       graphService,
       userProfile: account,
+      viewMode,
+      onViewModeToggle: handleViewModeToggle,
     };
 
     switch (currentPage) {

@@ -52,12 +52,14 @@ interface ProfessorDashboardProps {
   onNavigate: (page: Page) => void;
   graphService: any;
   userProfile: any;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
-const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, graphService: _graphService, userProfile: _userProfile }) => {
+const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, graphService: _graphService, userProfile: _userProfile, viewMode = 'student', onViewModeToggle  }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('professor');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+  const [selectedCourse, setSelectedCourse] = useState<number | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [quizPrompt, setQuizPrompt] = useState('');
@@ -73,12 +75,17 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
   const [viewingResource, setViewingResource] = useState<ResourceData | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Upload form state
+  // Upload form state - FIXED: course_id should be number, not string
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadDescription, setUploadDescription] = useState('');
-  const [uploadCourseId, setUploadCourseId] = useState('');
+  const [uploadCourseId, setUploadCourseId] = useState<number | null>(null);
   const [uploadWeekNumber, setUploadWeekNumber] = useState<number | undefined>(undefined);
+
+  // Week expansion state
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
+  const [weekResources, setWeekResources] = useState<Map<string, ResourceData[]>>(new Map());
+  const [isLoadingWeekResources, setIsLoadingWeekResources] = useState(false);
 
   // Load resources on mount
   useEffect(() => {
@@ -89,10 +96,32 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     try {
       const data = await getResources(DEFAULT_USER_ID);
       setResources(data);
+      // Clear week resources cache when reloading all resources
+      setWeekResources(new Map());
     } catch (error) {
       console.error('Failed to load resources:', error);
     }
   };
+
+  // Load resources when week is selected
+  useEffect(() => {
+    if (selectedCourse && selectedWeek) {
+      const weekKey = `${selectedCourse}-${selectedWeek}`;
+      if (!weekResources.has(weekKey)) {
+        setIsLoadingWeekResources(true);
+        getResources(DEFAULT_USER_ID, {
+          course_id: selectedCourse.toString(),
+          week_number: selectedWeek
+        }).then(weekResourcesList => {
+          setWeekResources(prev => new Map(prev).set(weekKey, weekResourcesList));
+          setIsLoadingWeekResources(false);
+        }).catch(error => {
+          console.error('Failed to load week resources:', error);
+          setIsLoadingWeekResources(false);
+        });
+      }
+    }
+  }, [selectedCourse, selectedWeek]);
 
   // Get file type icon component
   const getFileIcon = (fileType: string) => {
@@ -112,6 +141,24 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     }
   };
 
+  // Get small file type icon (for resources list under weeks)
+  const getFileIconSmall = (fileType: string, size: number = 18) => {
+    switch (fileType) {
+      case 'pdf':
+        return <FileText size={size} />;
+      case 'video':
+        return <Video size={size} />;
+      case 'audio':
+        return <Music size={size} />;
+      case 'image':
+        return <ImageIcon size={size} />;
+      case 'archive':
+        return <Archive size={size} />;
+      default:
+        return <File size={size} />;
+    }
+  };
+
   // Handle file selection
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -125,9 +172,20 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     }
   };
 
-  // Handle file upload
+  // Handle file upload - FIXED: Convert course_id to string for API
   const handleUpload = async () => {
     if (!uploadFile) return;
+
+    // MANDATORY: Check if course and week are selected
+    if (!uploadCourseId) {
+      setUploadError('Please select a course');
+      return;
+    }
+
+    if (!uploadWeekNumber) {
+      setUploadError('Please select a week number');
+      return;
+    }
 
     setIsUploading(true);
     setUploadError(null);
@@ -136,7 +194,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
       await uploadResource(DEFAULT_USER_ID, uploadFile, {
         title: uploadTitle || uploadFile.name,
         description: uploadDescription || undefined,
-        course_id: uploadCourseId || undefined,
+        course_id: uploadCourseId.toString(),
         week_number: uploadWeekNumber,
       });
 
@@ -158,7 +216,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     setUploadFile(null);
     setUploadTitle('');
     setUploadDescription('');
-    setUploadCourseId('');
+    setUploadCourseId(null);
     setUploadWeekNumber(undefined);
     setUploadError(null);
     if (fileInputRef.current) {
@@ -227,12 +285,31 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     }
   };
 
-  // Get resources filtered by course and week
+  // Get resources filtered by course and week - FIXED: Use weekResources when available
   const getFilteredResources = () => {
+    // If a specific course and week are selected, use the cached week resources
+    if (selectedCourse !== null && selectedWeek !== null) {
+      const weekKey = `${selectedCourse}-${selectedWeek}`;
+      const weekResourcesList = weekResources.get(weekKey);
+      
+      if (weekResourcesList) {
+        // Apply search filter if needed
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase();
+          return weekResourcesList.filter(r => 
+            r.title.toLowerCase().includes(query) ||
+            r.original_filename.toLowerCase().includes(query)
+          );
+        }
+        return weekResourcesList;
+      }
+    }
+    
+    // Otherwise, filter from the main resources array
     let filtered = resources;
     
-    if (selectedCourse) {
-      filtered = filtered.filter(r => r.course_id === selectedCourse);
+    if (selectedCourse !== null) {
+      filtered = filtered.filter(r => r.course_id === selectedCourse.toString());
     }
     
     if (selectedWeek) {
@@ -333,7 +410,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
       await deleteCourse(courseId);
       await loadCourses();
       await loadResources();
-      if (selectedCourse === String(courseId)) {
+      if (selectedCourse === courseId) {
         setSelectedCourse(null);
       }
     } catch (error) {
@@ -348,25 +425,83 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
   };
 
   const toggleCourse = (courseId: number) => {
-    setCourses(courses.map(course =>
-      course.id === courseId
-        ? { ...course, isExpanded: !course.isExpanded }
-        : course
+    const course = courses.find(c => c.id === courseId);
+    const isCurrentlyExpanded = course?.isExpanded || false;
+    
+    setCourses(courses.map(c =>
+      c.id === courseId
+        ? { ...c, isExpanded: !c.isExpanded }
+        : c
     ));
-    setSelectedCourse(String(courseId));
+    
+    // If course is being expanded, select it. If collapsing, deselect it.
+    if (!isCurrentlyExpanded) {
+      setSelectedCourse(courseId);
+      setSelectedWeek(null); // Clear week selection when selecting a new course
+    } else {
+      setSelectedCourse(null);
+      setSelectedWeek(null);
+    }
+  };
+
+  // Toggle week expansion and load resources if needed - FIXED: Fetch from API
+  const handleWeekToggle = async (courseId: number, weekNumber: number) => {
+    const weekKey = `${courseId}-${weekNumber}`;
+    const isCurrentlyExpanded = expandedWeeks.has(weekKey);
+    
+    // Toggle expansion state
+    setExpandedWeeks(prev => {
+      const next = new Set(prev);
+      if (next.has(weekKey)) {
+        next.delete(weekKey);
+      } else {
+        next.add(weekKey);
+      }
+      return next;
+    });
+    
+    // Load resources from API if not already cached
+    if (!weekResources.has(weekKey)) {
+      setIsLoadingWeekResources(true);
+      try {
+        const weekResourcesList = await getResources(DEFAULT_USER_ID, {
+          course_id: courseId.toString(),
+          week_number: weekNumber
+        });
+        setWeekResources(prev => new Map(prev).set(weekKey, weekResourcesList));
+      } catch (error) {
+        console.error('Failed to load week resources:', error);
+        // Fall back to filtering local resources
+        const weekResourcesList = resources.filter(r => 
+          r.course_id !== null && r.course_id === courseId.toString() && r.week_number === weekNumber
+        );
+        setWeekResources(prev => new Map(prev).set(weekKey, weekResourcesList));
+      } finally {
+        setIsLoadingWeekResources(false);
+      }
+    }
   };
 
   const selectWeek = (weekNumber: number) => {
     setSelectedWeek(selectedWeek === weekNumber ? null : weekNumber);
   };
 
-  // Get resources for selected course and week
-  const getCourseResources = (courseId: number, weekNumber?: number) => {
-    return resources.filter(r => {
-      if (r.course_id !== courseId) return false;
-      if (weekNumber !== undefined && r.week_number !== weekNumber) return false;
-      return true;
-    });
+  // Get resources for selected course and week - Uses API call via getResources
+  const getCourseResources = async (courseId: number, weekNumber?: number) => {
+    try {
+      return await getResources(DEFAULT_USER_ID, {
+        course_id: courseId.toString(),
+        week_number: weekNumber
+      });
+    } catch (error) {
+      console.error('Failed to fetch course resources:', error);
+      // Fall back to filtering local resources
+      return resources.filter(r => {
+        if (r.course_id !== courseId.toString()) return false;
+        if (weekNumber !== undefined && r.week_number !== weekNumber) return false;
+        return true;
+      });
+    }
   };
 
   const generateQuiz = async () => {
@@ -380,7 +515,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
         const azureOpenAIKey = 'YOUR_AZURE_OPENAI_KEY'; // Store securely!
 
         const _selectedResourcesList = Array.from(selectedResources);
-        const course = selectedCourse ? courses.find(c => c.id === Number(selectedCourse)) : null;
+        const course = selectedCourse ? courses.find(c => c.id === selectedCourse) : null;
         
         // Generate quiz with Azure OpenAI
         const aiResponse = await fetch(azureOpenAIEndpoint, {
@@ -435,7 +570,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
 
         alert('Quiz generated and sent successfully!');
         setShowAIPanel(false);
-        setSelectedLectures(new Set());
+        setSelectedResources(new Set());
         setQuizPrompt('');
         setRecipientEmail('');
     } catch (error) {
@@ -444,13 +579,13 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     } finally {
         setIsGenerating(false);
     }
-    };
+  };
 
   const getSelectedLectureCount = () => selectedResources.size;
 
   return (
     <div className="professor-container">
-      <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+      <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
 
       <div className="professor-content-wrapper">
         {/* Courses Sidebar */}
@@ -494,7 +629,7 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
               courses.map(course => (
                 <div key={course.id} className="course-item">
                   <div
-                    className={`course-header ${selectedCourse === String(course.id) ? 'active' : ''}`}
+                    className={`course-header ${selectedCourse === course.id ? 'active' : ''}`}
                     onClick={() => toggleCourse(course.id)}
                   >
                     <div className="course-header-left">
@@ -514,24 +649,94 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                   {course.isExpanded && (
                     <div className="weeks-list">
                       {Array.from({ length: course.total_weeks }, (_, i) => i + 1).map(weekNum => {
-                        const weekResources = getCourseResources(course.id, weekNum);
+                        const weekKey = `${course.id}-${weekNum}`;
+                        const isWeekExpanded = expandedWeeks.has(weekKey);
+                        // Use cached resources if available, otherwise filter from local state for count
+                        const weekResourcesList = weekResources.get(weekKey) || 
+                          resources.filter(r => r.course_id === course.id.toString() && r.week_number === weekNum);
+                        
                         return (
                           <div key={weekNum} className="week-item">
                             <div
-                              className={`week-header ${selectedWeek === weekNum && selectedCourse === String(course.id) ? 'active' : ''}`}
-                              onClick={() => selectWeek(weekNum)}
+                              className={`week-header ${selectedWeek === weekNum && selectedCourse === course.id ? 'active' : ''}`}
+                              onClick={() => {
+                                // 1. Toggle expansion in sidebar
+                                handleWeekToggle(course.id, weekNum);
+                                // 2. Select the course and week for the main view
+                                setSelectedCourse(course.id);
+                                setSelectedWeek(weekNum);
+                              }}
                             >
                               <div className="week-header-left">
+                                {isWeekExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                 <Calendar size={16} />
                                 <span>Week {weekNum}</span>
-                                {weekResources.length > 0 && (
-                                  <span className="week-resource-count">{weekResources.length}</span>
+                              </div>
+                              {weekResourcesList.length > 0 && (
+                                <span className="week-resource-count">{weekResourcesList.length}</span>
+                              )}
+                            </div>
+                            
+                            {/* Expandable Resources List */}
+                            {isWeekExpanded && (
+                              <div className="resources-list">
+                                {weekResourcesList.length > 0 ? (
+                                  weekResourcesList.map(resource => (
+                                    <div 
+                                      key={resource.id} 
+                                      className={`resource-list-item ${selectedResources.has(resource.id) ? 'selected' : ''}`}
+                                    >
+                                      <div className="resource-list-checkbox">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedResources.has(resource.id)}
+                                          onChange={(e) => {
+                                            e.stopPropagation();
+                                            toggleResourceSelection(resource.id);
+                                          }}
+                                        />
+                                      </div>
+                                      
+                                      <div className={`resource-icon-small ${resource.file_type}`}>
+                                        {getFileIconSmall(resource.file_type)}
+                                      </div>
+                                      
+                                      <div 
+                                        className="resource-list-info"
+                                        onClick={() => handleViewResource(resource)}
+                                      >
+                                        <div className="resource-list-title">{resource.title}</div>
+                                        <div className="resource-list-meta">
+                                          {resource.file_type.toUpperCase()} • {resource.file_size_formatted}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="empty-week-resources">
+                                    No resources uploaded for this week
+                                  </div>
                                 )}
                               </div>
-                            </div>
+                            )}
                           </div>
                         );
                       })}
+                      
+                      {/* Upload Resource Button */}
+                      <div className="week-upload-section">
+                        <button
+                          className="upload-resource-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUploadCourseId(course.id);
+                            setShowUploadModal(true);
+                          }}
+                        >
+                          <Upload size={16} />
+                          Upload Resource
+                        </button>
+                      </div>
                       
                       {/* Course actions */}
                       <div className="course-actions">
@@ -560,15 +765,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
             <div className="professor-header-left">
               <h1>Course Materials</h1>
               <p>Manage lecture notes and generate AI-powered assessments</p>
-            </div>
-            <div className="professor-header-actions">
-              <button 
-                className="header-action-btn primary upload-btn-large"
-                onClick={() => setShowUploadModal(true)}
-              >
-                <Upload size={20} />
-                <span>Upload Resource</span>
-              </button>
             </div>
           </div>
 
@@ -606,25 +802,33 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
           )}
 
           <div className="professor-content">
-            {/* Resources Grid */}
-            {getFilteredResources().length > 0 ? (
+            {isLoadingWeekResources ? (
+              <div className="loading-week-resources">
+                <div className="spinner" />
+                <p>Loading resources...</p>
+              </div>
+            ) : getFilteredResources().length > 0 ? (
               <div className="resources-section">
                 <div className="resources-header">
                   <h3>
-                    {selectedCourse 
-                      ? `Resources for ${courses.find(c => c.id === Number(selectedCourse))?.name || 'Course'}`
-                      : 'All Resources'
-                    }
+                    {selectedCourse
+                      ? `Resources for ${courses.find((c) => c.id === selectedCourse)?.name || "Course"}`
+                      : "All Resources"}
                     {selectedWeek && ` - Week ${selectedWeek}`}
                   </h3>
-                  <span className="resource-count">{getFilteredResources().length} files</span>
+                  <span className="resource-count">
+                    {getFilteredResources().length} files
+                  </span>
                 </div>
-                
+
+                {/* Resource Grid */}
                 <div className="resources-grid">
-                  {getFilteredResources().map(resource => (
-                    <div 
-                      key={resource.id} 
-                      className={`resource-card ${selectedResources.has(resource.id) ? 'selected' : ''}`}
+                  {getFilteredResources().map((resource) => (
+                    <div
+                      key={resource.id}
+                      className={`resource-card ${
+                        selectedResources.has(resource.id) ? "selected" : ""
+                      }`}
                     >
                       <div className="resource-checkbox">
                         <input
@@ -636,31 +840,38 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                           }}
                         />
                       </div>
-                      
-                      <div 
+
+                      <div
                         className="resource-content"
                         onClick={() => handleViewResource(resource)}
                       >
                         <div className={`resource-icon ${resource.file_type}`}>
                           {getFileIcon(resource.file_type)}
                         </div>
-                        
+
                         <div className="resource-info">
                           <div className="resource-title">{resource.title}</div>
                           <div className="resource-meta">
-                            <span className="resource-type">{resource.file_type.toUpperCase()}</span>
-                            <span className="resource-size">{resource.file_size_formatted}</span>
-                            <span className="resource-date">{formatResourceDate(resource.created_at)}</span>
+                            <span className="resource-type">
+                              {resource.file_type.toUpperCase()}
+                            </span>
+                            <span className="resource-size">
+                              {resource.file_size_formatted}
+                            </span>
+                            <span className="resource-date">
+                              {formatResourceDate(resource.created_at)}
+                            </span>
                           </div>
                           {resource.course_name && (
                             <div className="resource-course">
                               {resource.course_name}
-                              {resource.week_number && ` • Week ${resource.week_number}`}
+                              {resource.week_number &&
+                                ` • Week ${resource.week_number}`}
                             </div>
                           )}
                         </div>
                       </div>
-                      
+
                       <div className="resource-actions">
                         <button
                           className="resource-action-btn"
@@ -668,7 +879,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                             e.stopPropagation();
                             openResourceInNewTab(resource);
                           }}
-                          title="Open in new tab"
                         >
                           <ExternalLink size={16} />
                         </button>
@@ -678,7 +888,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                             e.stopPropagation();
                             downloadResource(resource);
                           }}
-                          title="Download"
                         >
                           <Download size={16} />
                         </button>
@@ -688,7 +897,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                             e.stopPropagation();
                             handleDeleteResource(resource.id);
                           }}
-                          title="Delete"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -696,158 +904,62 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                     </div>
                   ))}
                 </div>
-              </div>
-            ) : selectedCourse ? (
-              <div className="course-overview">
-                <div className="overview-cards">
-                  <div className="overview-card">
-                    <div className="overview-icon">
-                      <BookOpen size={24} />
-                    </div>
-                    <div className="overview-stats">
-                      <div className="overview-value">
-                        {courses.find(c => c.id === Number(selectedCourse))?.resource_count || 0}
-                      </div>
-                      <div className="overview-label">Total Resources</div>
-                    </div>
-                  </div>
 
-                  <div className="overview-card">
-                    <div className="overview-icon">
-                      <Users size={24} />
-                    </div>
-                    <div className="overview-stats">
-                      <div className="overview-value">
-                        {courses.find(c => c.id === Number(selectedCourse))?.student_count || 0}
-                      </div>
-                      <div className="overview-label">Enrolled Students</div>
-                    </div>
-                  </div>
-
-                  <div className="overview-card">
-                    <div className="overview-icon">
-                      <Calendar size={24} />
-                    </div>
-                    <div className="overview-stats">
-                      <div className="overview-value">
-                        {courses.find(c => c.id === Number(selectedCourse))?.total_weeks || 12}
-                      </div>
-                      <div className="overview-label">Weeks</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="empty-resources">
-                  <Upload size={48} />
-                  <h3>No resources uploaded yet</h3>
-                  <p>Upload lecture materials for this course</p>
-                  <button 
-                    className="upload-btn-primary"
+                {/* Bottom Upload Button */}
+                <div className="bottom-upload-section">
+                  <button
+                    className="upload-resource-btn"
                     onClick={() => {
                       setUploadCourseId(selectedCourse);
+                      setUploadWeekNumber(selectedWeek || undefined);
                       setShowUploadModal(true);
                     }}
                   >
-                    <Plus size={18} />
-                    Upload Resource
+                    <Upload size={18} />
+                    <span>Upload New Resource</span>
                   </button>
                 </div>
               </div>
-            ) : resources.length > 0 ? (
-              <div className="resources-section">
-                <div className="resources-header">
-                  <h3>All Resources</h3>
-                  <span className="resource-count">{resources.length} files</span>
+            ) : selectedWeek && selectedCourse ? (
+              <div className="empty-state week-empty">
+                <div className="empty-icon">
+                  <Upload size={40} />
                 </div>
-                
-                <div className="resources-grid">
-                  {resources.map(resource => (
-                    <div 
-                      key={resource.id} 
-                      className={`resource-card ${selectedResources.has(resource.id) ? 'selected' : ''}`}
-                    >
-                      <div className="resource-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={selectedResources.has(resource.id)}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            toggleResourceSelection(resource.id);
-                          }}
-                        />
-                      </div>
-                      
-                      <div 
-                        className="resource-content"
-                        onClick={() => handleViewResource(resource)}
-                      >
-                        <div className={`resource-icon ${resource.file_type}`}>
-                          {getFileIcon(resource.file_type)}
-                        </div>
-                        
-                        <div className="resource-info">
-                          <div className="resource-title">{resource.title}</div>
-                          <div className="resource-meta">
-                            <span className="resource-type">{resource.file_type.toUpperCase()}</span>
-                            <span className="resource-size">{resource.file_size_formatted}</span>
-                            <span className="resource-date">{formatResourceDate(resource.created_at)}</span>
-                          </div>
-                          {resource.course_name && (
-                            <div className="resource-course">
-                              {resource.course_name}
-                              {resource.week_number && ` • Week ${resource.week_number}`}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      <div className="resource-actions">
-                        <button
-                          className="resource-action-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openResourceInNewTab(resource);
-                          }}
-                          title="Open in new tab"
-                        >
-                          <ExternalLink size={16} />
-                        </button>
-                        <button
-                          className="resource-action-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            downloadResource(resource);
-                          }}
-                          title="Download"
-                        >
-                          <Download size={16} />
-                        </button>
-                        <button
-                          className="resource-action-btn delete"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteResource(resource.id);
-                          }}
-                          title="Delete"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="empty-state">
-                <FolderOpen size={64} />
-                <h3>No resources yet</h3>
-                <p>Upload lecture materials like PDFs, videos, documents, and recordings</p>
-                <button 
-                  className="upload-btn-primary"
-                  onClick={() => setShowUploadModal(true)}
+                <h3>Week {selectedWeek} is Empty</h3>
+                <p>There are no resources uploaded for this week yet.</p>
+                <button
+                  className="upload-resource-btn"
+                  onClick={() => {
+                    setUploadCourseId(selectedCourse);
+                    setUploadWeekNumber(selectedWeek);
+                    setShowUploadModal(true);
+                  }}
                 >
                   <Upload size={18} />
-                  Upload Your First Resource
+                  Upload to Week {selectedWeek}
+                </button>
+              </div>
+            ) : (
+              <div className="empty-state global-empty">
+                <div className="empty-icon">
+                  <FileText size={40} />
+                </div>
+                <h3>No Resources Found</h3>
+                <p>
+                  {searchQuery
+                    ? `No resources match "${searchQuery}"`
+                    : "Upload your first resource to get started."}
+                </p>
+                <button
+                  className="upload-resource-btn"
+                  onClick={() => {
+                    setUploadCourseId(selectedCourse);
+                    setUploadWeekNumber(undefined);
+                    setShowUploadModal(true);
+                  }}
+                >
+                  <Upload size={18} />
+                  Upload Resource
                 </button>
               </div>
             )}
@@ -1061,13 +1173,14 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
 
                   <div className="form-row">
                     <div className="form-group">
-                      <label>Course</label>
+                      <label>Course *</label>
                       <select
                         className="form-select"
-                        value={uploadCourseId}
-                        onChange={(e) => setUploadCourseId(e.target.value)}
+                        value={uploadCourseId ?? ''}
+                        onChange={(e) => setUploadCourseId(e.target.value ? Number(e.target.value) : null)}
+                        required
                       >
-                        <option value="">Select a course (optional)</option>
+                        <option value="">Select a course</option>
                         {courses.map(course => (
                           <option key={course.id} value={course.id}>
                             {course.code} - {course.name}
@@ -1077,16 +1190,17 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
                     </div>
 
                     <div className="form-group">
-                      <label>Week Number</label>
+                      <label>Week Number *</label>
                       <select
                         className="form-select"
                         value={uploadWeekNumber || ''}
                         onChange={(e) => setUploadWeekNumber(e.target.value ? parseInt(e.target.value) : undefined)}
                         disabled={!uploadCourseId}
+                        required
                       >
-                        <option value="">Select week (optional)</option>
-                        {uploadCourseId && courses.find(c => c.id === Number(uploadCourseId)) && 
-                          Array.from({ length: courses.find(c => c.id === Number(uploadCourseId))?.total_weeks || 12 }, (_, i) => (
+                        <option value="">Select week</option>
+                        {uploadCourseId && courses.find(c => c.id === uploadCourseId) && 
+                          Array.from({ length: courses.find(c => c.id === uploadCourseId)?.total_weeks || 12 }, (_, i) => (
                             <option key={i + 1} value={i + 1}>
                               Week {i + 1}
                             </option>

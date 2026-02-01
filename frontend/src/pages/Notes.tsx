@@ -58,6 +58,8 @@ interface NotesProps {
   persistedActiveTabId?: string;
   onTabsChange?: (tabs: OpenTab[]) => void;
   onActiveTabChange?: (tabId: string) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -136,7 +138,9 @@ const Notes: React.FC<NotesProps> = ({
   persistedOpenTabs,
   persistedActiveTabId,
   onTabsChange,
-  onActiveTabChange
+  onActiveTabChange,
+  viewMode = 'student', 
+  onViewModeToggle 
 }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('notes');
   const [folders, setFolders] = useState<LectureFolder[]>([]);
@@ -825,7 +829,7 @@ const Notes: React.FC<NotesProps> = ({
   if (loading) {
     return (
       <div className="notes-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="notes-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%' }}>
             <p>Loading notes...</p>

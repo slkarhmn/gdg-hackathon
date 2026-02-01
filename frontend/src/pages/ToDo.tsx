@@ -55,9 +55,11 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface ToDoProps {
     onNavigate: (page: Page) => void;
+    viewMode?: 'student' | 'professor';
+    onViewModeToggle?: () => void;
 }
 
-const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
+const ToDo: React.FC<ToDoProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle  }) => {
     const [mainSidebarTab, setMainSidebarTab] = useState('todo');
     const [selectedList, setSelectedList] = useState<string>('my-day');
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -241,7 +243,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
 
     return (
         <div className="todo-page-container">
-            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
 
             <div className="todo-content-wrapper">
                 {/* Lists Sidebar */}
