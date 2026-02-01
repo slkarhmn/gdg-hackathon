@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { useGraphService } from './auth/graphService';
 import Login from './pages/Login';
@@ -9,6 +10,7 @@ import Calendar from './pages/Calendar';
 import ToDo from './pages/ToDo';
 import GetHelp from './pages/GetHelp';
 import ProfessorDashboard from './pages/Professordashboard';
+import AuthCallback from './components/AuthCallback';
 import type { BackendNote } from './api';
 import './styles/globals.css';
 
@@ -146,7 +148,12 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="*" element={<AppContent />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   );
 }

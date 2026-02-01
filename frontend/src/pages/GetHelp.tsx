@@ -1,41 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
     Send,
-    Users,
     MessageCircle,
-    Clock,
     Search,
-    Filter,
     ChevronRight,
-    User,
-    CheckCircle2,
-    Circle
+    RefreshCw,
+    Loader2,
+    AlertCircle,
+    LogOut
 } from 'lucide-react';
 import './GetHelp.css';
+import { useAuth } from '../auth/AuthContext';
 
-interface Professor {
-    id: string;
-    name: string;
-    subject: string;
-    avatar: string;
-    status: 'online' | 'offline' | 'busy';
-    responseTime: string;
-}
+// Backend API base URL
+const API_BASE = 'http://localhost:5000/api';
 
-interface Conversation {
+interface Chat {
     id: string;
-    professorId: string;
-    professorName: string;
-    subject: string;
-    lastMessage: string;
-    timestamp: string;
-    unread: boolean;
+    topic?: string;
+    chatType: string;
+    createdDateTime: string;
+    lastUpdatedDateTime: string;
 }
 
 interface Message {
     id: string;
-    sender: 'user' | 'professor';
+    sender: 'user' | 'other';
+    senderName: string;
     content: string;
     timestamp: string;
 }
@@ -47,388 +39,423 @@ interface GetHelpProps {
 }
 
 const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
+    // ✅ FIXED: Use AuthContext instead of localStorage directly
+    const { getAccessToken, logout, isAuthenticated } = useAuth();
+    
     const [mainSidebarTab, setMainSidebarTab] = useState('help');
-    const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+    const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
     const [messageInput, setMessageInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    
+    const [chats, setChats] = useState<Chat[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isLoadingChats, setIsLoadingChats] = useState(true);
+    const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+    const [isSending, setIsSending] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [permissionError, setPermissionError] = useState(false);
 
-    const [professors] = useState<Professor[]>([
-        {
-            id: '1',
-            name: 'Dr. Sarah Johnson',
-            subject: 'Human Computer Interaction',
-            avatar: 'SJ',
-            status: 'online',
-            responseTime: 'Usually responds in 2 hours'
-        },
-        {
-            id: '2',
-            name: 'Prof. Michael Chen',
-            subject: 'Data Structures & Algorithms',
-            avatar: 'MC',
-            status: 'online',
-            responseTime: 'Usually responds in 1 hour'
-        },
-        {
-            id: '3',
-            name: 'Dr. Emily Rodriguez',
-            subject: 'Database Systems',
-            avatar: 'ER',
-            status: 'busy',
-            responseTime: 'Usually responds in 4 hours'
-        },
-        {
-            id: '4',
-            name: 'Prof. David Kim',
-            subject: 'Operating Systems',
-            avatar: 'DK',
-            status: 'offline',
-            responseTime: 'Usually responds in 6 hours'
-        },
-        {
-            id: '5',
-            name: 'Dr. Lisa Anderson',
-            subject: 'Web Development',
-            avatar: 'LA',
-            status: 'online',
-            responseTime: 'Usually responds in 3 hours'
+    // Fetch chats when component mounts
+    useEffect(() => {
+        if (isAuthenticated) {
+            fetchChats();
         }
-    ]);
+    }, [isAuthenticated]);
 
-    const [conversations] = useState<Conversation[]>([
-        {
-            id: '1',
-            professorId: '1',
-            professorName: 'Dr. Sarah Johnson',
-            subject: 'HCI Assignment Question',
-            lastMessage: 'Thank you for the clarification!',
-            timestamp: '2 hours ago',
-            unread: false
-        },
-        {
-            id: '2',
-            professorId: '2',
-            professorName: 'Prof. Michael Chen',
-            subject: 'Binary Tree Implementation',
-            lastMessage: 'Could you explain the time complexity?',
-            timestamp: '1 day ago',
-            unread: true
-        },
-        {
-            id: '3',
-            professorId: '3',
-            professorName: 'Dr. Emily Rodriguez',
-            subject: 'SQL Query Help',
-            lastMessage: 'Thanks for your help!',
-            timestamp: '3 days ago',
-            unread: false
+    // Fetch messages when a chat is selected
+    useEffect(() => {
+        if (selectedChatId) {
+            fetchMessages(selectedChatId);
         }
-    ]);
+    }, [selectedChatId]);
 
-    const [messages] = useState<{ [key: string]: Message[] }>({
-        '1': [
-            {
-                id: '1',
-                sender: 'user',
-                content: 'Hi Dr. Johnson, I have a question about the user research methods assignment.',
-                timestamp: '10:30 AM'
-            },
-            {
-                id: '2',
-                sender: 'professor',
-                content: 'Hello! I\'d be happy to help. What specific aspect are you struggling with?',
-                timestamp: '10:45 AM'
-            },
-            {
-                id: '3',
-                sender: 'user',
-                content: 'I\'m not sure how to structure the interview questions for the user personas section.',
-                timestamp: '10:50 AM'
-            },
-            {
-                id: '4',
-                sender: 'professor',
-                content: 'Great question! Start by identifying your target user groups, then create open-ended questions that explore their goals, pain points, and behaviors. Focus on "why" and "how" questions rather than yes/no questions.',
-                timestamp: '11:00 AM'
-            },
-            {
-                id: '5',
-                sender: 'user',
-                content: 'Thank you for the clarification!',
-                timestamp: '11:15 AM'
-            }
-        ],
-        '2': [
-            {
-                id: '1',
-                sender: 'user',
-                content: 'Hi Professor Chen, I need help understanding binary tree traversal.',
-                timestamp: 'Yesterday 2:30 PM'
-            },
-            {
-                id: '2',
-                sender: 'professor',
-                content: 'Sure! Are you working on in-order, pre-order, or post-order traversal?',
-                timestamp: 'Yesterday 3:00 PM'
-            },
-            {
-                id: '3',
-                sender: 'user',
-                content: 'Could you explain the time complexity?',
-                timestamp: 'Yesterday 3:15 PM'
-            }
-        ]
-    });
+    const fetchChats = async () => {
+        try {
+            setIsLoadingChats(true);
+            setError(null);
+            setPermissionError(false);
 
-    const handleTabChange = (tab: string) => {
-        setMainSidebarTab(tab);
-        onNavigate(tab as Page);
+            // ✅ FIXED: Get fresh token from MSAL
+            const token = await getAccessToken();
+            if (!token) {
+                setError('Not authenticated. Please sign in with Microsoft.');
+                setIsLoadingChats(false);
+                return;
+            }
+
+            console.log('🔵 Fetching chats with MSAL token...');
+
+            const response = await fetch(`${API_BASE}/teams/chats`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            console.log('🔵 Chats response status:', response.status);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ Chats error:', errorText);
+                
+                // Check if it's a 403 Forbidden error (permissions issue)
+                if (response.status === 403) {
+                    setPermissionError(true);
+                    throw new Error('Permission denied. You need to sign out and sign in again to grant chat access permissions.');
+                }
+                
+                throw new Error(`Failed to load chats (${response.status})`);
+            }
+
+            const data = await response.json();
+            console.log('✅ Chats loaded:', data.chats?.length || 0, 'chats');
+            
+            setChats(data.chats || []);
+        } catch (err: any) {
+            console.error('❌ Error fetching chats:', err);
+            setError(err.message || 'Failed to load chats');
+        } finally {
+            setIsLoadingChats(false);
+        }
+    };
+
+    const fetchMessages = async (chatId: string) => {
+        try {
+            setIsLoadingMessages(true);
+            setError(null);
+
+            // ✅ FIXED: Get fresh token from MSAL
+            const token = await getAccessToken();
+            if (!token) return;
+
+            const response = await fetch(`${API_BASE}/teams/chats/${chatId}/messages?limit=50`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to load messages');
+            }
+
+            const data = await response.json();
+            const teamsMessages = data.messages || [];
+
+            // Convert to our format
+            const formattedMessages: Message[] = teamsMessages.reverse().map((msg: any) => ({
+                id: msg.id,
+                sender: msg.from?.user?.displayName === 'You' ? 'user' : 'other',
+                senderName: msg.from?.user?.displayName || 'Unknown',
+                content: stripHtml(msg.body.content),
+                timestamp: formatTimestamp(msg.createdDateTime),
+            }));
+
+            setMessages(formattedMessages);
+        } catch (err: any) {
+            console.error('Error fetching messages:', err);
+            setError('Failed to load messages.');
+        } finally {
+            setIsLoadingMessages(false);
+        }
+    };
+
+    const sendMessage = async () => {
+        if (!messageInput.trim() || !selectedChatId) return;
+
+        try {
+            setIsSending(true);
+            setError(null);
+
+            // ✅ FIXED: Get fresh token from MSAL
+            const token = await getAccessToken();
+            if (!token) {
+                setError('Not authenticated.');
+                return;
+            }
+
+            const response = await fetch(`${API_BASE}/teams/chats/send`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    chat_id: selectedChatId,
+                    message: messageInput
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to send message');
+            }
+
+            setMessageInput('');
+
+            // Refresh messages
+            setTimeout(() => {
+                fetchMessages(selectedChatId);
+            }, 500);
+
+        } catch (err: any) {
+            console.error('Error sending message:', err);
+            setError('Failed to send message: ' + err.message);
+        } finally {
+            setIsSending(false);
+        }
     };
 
     const handleSendMessage = () => {
-        if (messageInput.trim() && selectedConversation) {
-            // In a real app, this would send the message to Microsoft Teams
-            console.log('Sending message:', messageInput);
-            setMessageInput('');
+        sendMessage();
+    };
+
+    const handleKeyPress = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
         }
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'online': return '#6B9080';
-            case 'busy': return '#F4A261';
-            case 'offline': return '#9ca3af';
-            default: return '#9ca3af';
-        }
+    const handleForceRelogin = () => {
+        // Clear tokens and sign out via MSAL
+        logout();
     };
 
-    const filteredProfessors = professors.filter(prof =>
-        prof.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        prof.subject.toLowerCase().includes(searchQuery.toLowerCase())
+    const stripHtml = (html: string): string => {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        return tmp.textContent || tmp.innerText || '';
+    };
+
+    const formatTimestamp = (dateString: string): string => {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} min ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        
+        return date.toLocaleDateString();
+    };
+
+    const getChatDisplayName = (chat: Chat): string => {
+        if (chat.topic) return chat.topic;
+        if (chat.chatType === 'oneOnOne') return 'Direct Message';
+        return 'Group Chat';
+    };
+
+    const getChatPreview = (chat: Chat): string => {
+        return `Last updated: ${formatTimestamp(chat.lastUpdatedDateTime)}`;
+    };
+
+    const filteredChats = chats.filter(chat =>
+        getChatDisplayName(chat).toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const selectedConv = conversations.find(c => c.id === selectedConversation);
-    const currentMessages = selectedConversation ? messages[selectedConversation] || [] : [];
+    const selectedChat = chats.find(c => c.id === selectedChatId);
 
     return (
-        <div className="help-page-container">
-            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
-
-            <div className="help-content-wrapper">
-                {/* Professors Sidebar */}
-                <aside className="help-sidebar">
-                    <div className="help-sidebar-header">
-                        <h2>Get Help</h2>
-                        <p className="help-subtitle">Connect with your professors</p>
+        <div className="get-help-container">
+            <Sidebar activeTab={mainSidebarTab} onTabChange={setMainSidebarTab} onNavigate={onNavigate} />
+            
+            <div className="get-help-content">
+                <div className="get-help-header">
+                    <div className="header-left">
+                        <MessageCircle size={24} />
+                        <h1>Get Help - Teams Chat</h1>
                     </div>
-
-                    <div className="help-search">
-                        <Search size={16} />
-                        <input
-                            type="text"
-                            placeholder="Search professors..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                        />
+                    <div className="header-actions">
+                        <button 
+                            className="refresh-button"
+                            onClick={fetchChats}
+                            disabled={isLoadingChats}
+                        >
+                            {isLoadingChats ? (
+                                <Loader2 size={18} className="spinning" />
+                            ) : (
+                                <RefreshCw size={18} />
+                            )}
+                            Refresh
+                        </button>
                     </div>
+                </div>
 
-                    <div className="professors-section">
-                        <div className="section-header">
-                            <Users size={16} />
-                            <span>Available Professors</span>
-                        </div>
-
-                        {filteredProfessors.map(professor => (
-                            <div
-                                key={professor.id}
-                                className="professor-item"
-                                onClick={() => {
-                                    // In a real app, this would start a new conversation
-                                    const existingConv = conversations.find(c => c.professorId === professor.id);
-                                    if (existingConv) {
-                                        setSelectedConversation(existingConv.id);
-                                    }
+                {/* Permission Error Banner */}
+                {permissionError && (
+                    <div className="error-banner" style={{ 
+                        backgroundColor: '#fee2e2', 
+                        border: '1px solid #fca5a5',
+                        padding: '16px',
+                        borderRadius: '8px',
+                        marginBottom: '16px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '12px'
+                    }}>
+                        <AlertCircle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
+                        <div style={{ flex: 1 }}>
+                            <h3 style={{ margin: 0, marginBottom: '8px', color: '#dc2626', fontSize: '16px', fontWeight: '600' }}>
+                                Missing Chat Permissions
+                            </h3>
+                            <p style={{ margin: 0, marginBottom: '12px', color: '#991b1b', fontSize: '14px' }}>
+                                Your account doesn't have permission to access Teams chats. Please sign out and sign in again.
+                            </p>
+                            <button 
+                                onClick={handleForceRelogin}
+                                style={{
+                                    backgroundColor: '#dc2626',
+                                    color: 'white',
+                                    padding: '8px 16px',
+                                    borderRadius: '6px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    fontSize: '14px',
+                                    fontWeight: '500'
                                 }}
                             >
-                                <div className="professor-avatar">
-                                    <div className="avatar-circle">{professor.avatar}</div>
-                                    <div
-                                        className="status-indicator"
-                                        style={{ backgroundColor: getStatusColor(professor.status) }}
-                                    />
-                                </div>
-                                <div className="professor-info">
-                                    <div className="professor-name">{professor.name}</div>
-                                    <div className="professor-subject">{professor.subject}</div>
-                                    <div className="professor-response">
-                                        <Clock size={12} />
-                                        <span>{professor.responseTime}</span>
-                                    </div>
-                                </div>
-                                <ChevronRight size={18} className="professor-arrow" />
-                            </div>
-                        ))}
+                                <LogOut size={16} />
+                                Sign Out and Re-login
+                            </button>
+                        </div>
                     </div>
+                )}
 
-                    <div className="conversations-section">
-                        <div className="section-header">
-                            <MessageCircle size={16} />
-                            <span>Recent Conversations</span>
+                {/* Regular Error Banner */}
+                {error && !permissionError && (
+                    <div className="error-banner">
+                        <p>{error}</p>
+                    </div>
+                )}
+
+                <div className="get-help-main">
+                    {/* Left Panel - Chats List */}
+                    <div className="chats-panel">
+                        <div className="panel-header">
+                            <h2>Your Chats</h2>
+                            <span className="chat-count">{filteredChats.length}</span>
                         </div>
 
-                        {conversations.map(conversation => (
-                            <div
-                                key={conversation.id}
-                                className={`conversation-item ${selectedConversation === conversation.id ? 'active' : ''}`}
-                                onClick={() => setSelectedConversation(conversation.id)}
-                            >
-                                <div className="conversation-indicator">
-                                    {conversation.unread ? (
-                                        <Circle size={8} fill="#6B9080" color="#6B9080" />
-                                    ) : (
-                                        <CheckCircle2 size={14} color="#9ca3af" />
-                                    )}
-                                </div>
-                                <div className="conversation-info">
-                                    <div className="conversation-title">{conversation.subject}</div>
-                                    <div className="conversation-meta">
-                                        <span className="conversation-professor">{conversation.professorName}</span>
-                                        <span className="conversation-time">{conversation.timestamp}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </aside>
+                        <div className="search-box">
+                            <Search size={18} />
+                            <input
+                                type="text"
+                                placeholder="Search conversations..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
 
-                {/* Main Chat Area */}
-                <main className="help-main">
-                    {selectedConversation ? (
-                        <>
-                            <div className="chat-header">
-                                <div className="chat-header-info">
-                                    <h2 className="chat-title">{selectedConv?.subject}</h2>
-                                    <p className="chat-subtitle">{selectedConv?.professorName}</p>
-                                </div>
-                                <div className="chat-header-actions">
-                                    <button className="chat-action-btn" title="Filter messages">
-                                        <Filter size={18} />
-                                    </button>
-                                </div>
+                        {isLoadingChats ? (
+                            <div className="loading-state">
+                                <Loader2 size={32} className="spinning" />
+                                <p>Loading chats...</p>
                             </div>
-
-                            <div className="messages-container">
-                                {currentMessages.map(message => (
+                        ) : filteredChats.length === 0 ? (
+                            <div className="empty-state">
+                                <MessageCircle size={48} />
+                                <p>No chats found</p>
+                                <small>Start a conversation in Microsoft Teams</small>
+                            </div>
+                        ) : (
+                            <div className="chats-list">
+                                {filteredChats.map(chat => (
                                     <div
-                                        key={message.id}
-                                        className={`message ${message.sender === 'user' ? 'message-user' : 'message-professor'}`}
+                                        key={chat.id}
+                                        className={`chat-item ${selectedChatId === chat.id ? 'active' : ''}`}
+                                        onClick={() => setSelectedChatId(chat.id)}
                                     >
-                                        <div className="message-avatar">
-                                            {message.sender === 'user' ? (
-                                                <User size={16} />
-                                            ) : (
-                                                <div className="professor-avatar-small">
-                                                    {professors.find(p => p.id === selectedConv?.professorId)?.avatar}
-                                                </div>
-                                            )}
+                                        <div className="chat-avatar">
+                                            <MessageCircle size={20} />
                                         </div>
-                                        <div className="message-content">
-                                            <div className="message-text">{message.content}</div>
-                                            <div className="message-timestamp">{message.timestamp}</div>
+                                        <div className="chat-info">
+                                            <div className="chat-name">{getChatDisplayName(chat)}</div>
+                                            <div className="chat-preview">{getChatPreview(chat)}</div>
                                         </div>
+                                        <ChevronRight size={18} className="chat-arrow" />
                                     </div>
                                 ))}
                             </div>
+                        )}
+                    </div>
 
-                            <div className="message-input-container">
-                                <input
-                                    type="text"
-                                    className="message-input"
-                                    placeholder="Type your message..."
-                                    value={messageInput}
-                                    onChange={(e) => setMessageInput(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                                />
-                                <button
-                                    className="send-btn"
-                                    onClick={handleSendMessage}
-                                    disabled={!messageInput.trim()}
-                                >
-                                    <Send size={18} />
-                                </button>
+                    {/* Right Panel - Messages */}
+                    <div className="messages-panel">
+                        {!selectedChatId ? (
+                            <div className="no-chat-selected">
+                                <MessageCircle size={64} />
+                                <h3>Select a chat to start messaging</h3>
+                                <p>Choose from your existing conversations</p>
                             </div>
-                        </>
-                    ) : (
-                        <div className="empty-state">
-                            <MessageCircle size={64} className="empty-icon" />
-                            <h3>Select a conversation</h3>
-                            <p>Choose a professor or recent conversation to start chatting</p>
-                        </div>
-                    )}
-                </main>
-
-                {/* Info Panel */}
-                {selectedConversation && (
-                    <aside className="info-panel">
-                        <div className="info-header">
-                            <h3>Conversation Details</h3>
-                        </div>
-
-                        <div className="info-content">
-                            <div className="info-section">
-                                <div className="info-label">Professor</div>
-                                <div className="professor-card">
-                                    <div className="professor-avatar-large">
-                                        {professors.find(p => p.id === selectedConv?.professorId)?.avatar}
+                        ) : (
+                            <>
+                                <div className="chat-header">
+                                    <div className="chat-header-info">
+                                        <h3>{selectedChat ? getChatDisplayName(selectedChat) : 'Chat'}</h3>
+                                        <span className="chat-type">{selectedChat?.chatType}</span>
                                     </div>
-                                    <div className="professor-details">
-                                        <div className="professor-name-large">{selectedConv?.professorName}</div>
-                                        <div className="professor-subject-large">
-                                            {professors.find(p => p.id === selectedConv?.professorId)?.subject}
+                                </div>
+
+                                <div className="messages-area">
+                                    {isLoadingMessages ? (
+                                        <div className="loading-state">
+                                            <Loader2 size={32} className="spinning" />
+                                            <p>Loading messages...</p>
                                         </div>
-                                    </div>
+                                    ) : messages.length === 0 ? (
+                                        <div className="empty-messages">
+                                            <p>No messages yet. Start the conversation!</p>
+                                        </div>
+                                    ) : (
+                                        messages.map(message => (
+                                            <div
+                                                key={message.id}
+                                                className={`message ${message.sender === 'user' ? 'message-user' : 'message-other'}`}
+                                            >
+                                                <div className="message-content">
+                                                    {message.sender === 'other' && (
+                                                        <div className="message-sender">{message.senderName}</div>
+                                                    )}
+                                                    <div className="message-text">{message.content}</div>
+                                                    <div className="message-time">{message.timestamp}</div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
-                            </div>
 
-                            <div className="info-section">
-                                <div className="info-label">Status</div>
-                                <div className="status-card">
-                                    <div
-                                        className="status-dot"
-                                        style={{
-                                            backgroundColor: getStatusColor(
-                                                professors.find(p => p.id === selectedConv?.professorId)?.status || 'offline'
-                                            )
-                                        }}
+                                <div className="message-input-container">
+                                    <input
+                                        type="text"
+                                        placeholder="Type your message..."
+                                        value={messageInput}
+                                        onChange={(e) => setMessageInput(e.target.value)}
+                                        onKeyPress={handleKeyPress}
+                                        disabled={isSending}
                                     />
-                                    <span className="status-text">
-                                        {professors.find(p => p.id === selectedConv?.professorId)?.status === 'online'
-                                            ? 'Online'
-                                            : professors.find(p => p.id === selectedConv?.professorId)?.status === 'busy'
-                                                ? 'Busy'
-                                                : 'Offline'}
-                                    </span>
+                                    <button 
+                                        onClick={handleSendMessage}
+                                        disabled={!messageInput.trim() || isSending}
+                                        className="send-button"
+                                    >
+                                        {isSending ? (
+                                            <Loader2 size={20} className="spinning" />
+                                        ) : (
+                                            <Send size={20} />
+                                        )}
+                                    </button>
                                 </div>
-                            </div>
-
-                            <div className="info-section">
-                                <div className="info-label">Response Time</div>
-                                <div className="response-time-card">
-                                    <Clock size={16} />
-                                    <span>{professors.find(p => p.id === selectedConv?.professorId)?.responseTime}</span>
-                                </div>
-                            </div>
-
-                            <div className="info-section">
-                                <div className="info-label">Integration</div>
-                                <div className="integration-badge">
-                                    <MessageCircle size={16} />
-                                    <span>Microsoft Teams</span>
-                                </div>
-                            </div>
-                        </div>
-                    </aside>
-                )}
+                            </>
+                        )}
+                    </div>
+                </div>
             </div>
         </div>
     );

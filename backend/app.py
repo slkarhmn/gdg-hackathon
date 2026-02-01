@@ -5,10 +5,22 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import json
 import os
+from microsoft_routes import register_microsoft_routes
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+# CORS(app)
 
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:5173", "http://localhost:3000"],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 # Database configuration
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'study_app.db')
@@ -26,6 +38,7 @@ api = Api(
 )
 
 db = SQLAlchemy(app)
+register_microsoft_routes(api)
 
 # =============================================================================
 # MODELS
