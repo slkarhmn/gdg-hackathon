@@ -1,10 +1,31 @@
-from flask import Flask, request
+# from venv import logger
+
+from flask import Flask, request, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_restx import Api, Resource, fields, Namespace
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import json
 import os
+from ai_notes import (
+    extract_text_from_note,
+    generate_summary_and_questions,
+    export_note_as_docx,
+    export_note_as_pdf
+)
+from dotenv import load_dotenv
+load_dotenv()  # This will load variables from .env into os.environ
+
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | app | %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
 
 app = Flask(__name__)
 CORS(app)
@@ -1138,6 +1159,83 @@ class HealthCheck(Resource):
     def get(self):
         """Health check endpoint"""
         return {'status': 'healthy', 'timestamp': datetime.utcnow().isoformat()}, 200
+
+# =============================================================================
+# API ENDPOINTS - AI NOTES GENERATION
+# =============================================================================
+
+print("OPENAI_API_KEY is:", os.environ.get("OPENAI_API_KEY"))
+
+
+# @app.route('/api/users/<int:user_id>/generate-ai-note', methods=['POST'])
+# def generate_ai_note(user_id):
+#     data = request.get_json()
+#     note_id = data.get("note_id")
+#     note = Note.query.get_or_404(note_id)
+#     lecture_text = extract_text_from_note(note)
+#     summary, questions = generate_summary_and_questions(lecture_text)
+#     return jsonify({
+#         "summary": summary,
+#         "questions": questions,
+#         "note_id": note_id,
+#         "subject": note.subject,
+#         "tags": json.loads(note.tags) if note.tags else []
+#         #TODO  Ask chatgpt to add logging to see which part is failing exactly
+#     })
+@app.route('/api/users/<int:user_id>/generate-ai-note', methods=['POST'])
+def generate_ai_note(user_id):
+    logger.info(f"AI note generation requested for user_id={user_id}")
+
+    data = request.get_json()
+    if not data or "note_id" not in data:
+        logger.error("note_id missing in request body")
+        return jsonify({"error": "note_id is required"}), 400
+
+    note_id = data["note_id"]
+    logger.info(f"Fetching note ID={note_id}")
+
+
+    try:
+        note = Note.query.get_or_404(note_id)
+        print(note)
+        lecture_text = extract_text_from_note(note)
+
+        logger.info("Calling AI generation function")
+        summary, questions = generate_summary_and_questions(lecture_text)
+
+        logger.info("AI generation successful")
+
+        return jsonify({
+            "summary": summary,
+            "questions": questions,
+            "note_id": note_id,
+            "subject": note.subject,
+            "tags": json.loads(note.tags) if note.tags else []
+        })
+
+    except Exception as e:
+        logger.exception("AI note generation FAILED")
+        return jsonify({
+            "error": "Failed to generate AI notes",
+            "details": str(e)
+        }), 500
+
+
+@app.route('/api/notes/<int:note_id>/export', methods=['GET'])
+def export_note(note_id):
+    fmt = request.args.get("format", "pdf")
+    note = Note.query.get_or_404(note_id)
+    content_dict = json.loads(note.content)
+    summary = content_dict.get("summary", "")
+    questions = content_dict.get("questions", "")
+
+    if fmt == "docx":
+        temp = export_note_as_docx(note, summary, questions)
+        return send_file(temp.name, as_attachment=True, download_name=f"{note.subject or 'note'}.docx")
+    else:
+        temp = export_note_as_pdf(note, summary, questions)
+        return send_file(temp.name, as_attachment=True, download_name=f"{note.subject or 'note'}.pdf")
+
 
 
 # =============================================================================

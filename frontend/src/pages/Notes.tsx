@@ -87,7 +87,7 @@ function extractNoteContent(note: BackendNote): string {
 // Transform backend notes to folder structure grouped by subject
 function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
   const folderMap = new Map<string, Note[]>();
-  
+
   notes.forEach(note => {
     const subject = note.subject || 'Uncategorized';
     if (!folderMap.has(subject)) {
@@ -103,7 +103,7 @@ function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
 
   const folders: LectureFolder[] = [];
   let index = 1;
-  
+
   folderMap.forEach((folderNotes, folderName) => {
     folders.push({
       id: index.toString(),
@@ -133,10 +133,10 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
 
         const notesData = await fetchNotes();
         setAllNotesData(notesData);
-        
+
         // Group notes into folders by subject
         const groupedFolders = groupNotesIntoFolders(notesData);
-        
+
         // If no notes from API, use placeholder folders
         if (groupedFolders.length === 0) {
           const placeholderFolders: LectureFolder[] = [
@@ -155,13 +155,13 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
             }
           ];
           setFolders(placeholderFolders);
-          
+
           // Set initial tab
           setOpenTabs([{ id: 'placeholder-1', title: 'Welcome to Notes', folderId: '1' }]);
           setActiveTabId('placeholder-1');
         } else {
           setFolders(groupedFolders);
-          
+
           // Set initial tab to first note of first folder
           if (groupedFolders[0]?.notes[0]) {
             const firstNote = groupedFolders[0].notes[0];
@@ -201,6 +201,13 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorTitleRef = useRef('');
   const editorBodyRef = useRef('');
+  // --- AI-powered summary & export states ---
+  const [aiSummary, setAISummary] = useState('');
+  const [aiQuestions, setAIQuestions] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingAI, setIsSavingAI] = useState(false);
+
+
 
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -390,12 +397,12 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
                       {note.tags && note.tags.length > 0 && (
                         <div style={{ display: 'flex', gap: '4px', marginTop: '2px', flexWrap: 'wrap' }}>
                           {note.tags.slice(0, 3).map((tag, idx) => (
-                            <span 
-                              key={idx} 
-                              style={{ 
-                                fontSize: '0.65rem', 
-                                backgroundColor: '#e5e7eb', 
-                                padding: '1px 4px', 
+                            <span
+                              key={idx}
+                              style={{
+                                fontSize: '0.65rem',
+                                backgroundColor: '#e5e7eb',
+                                padding: '1px 4px',
                                 borderRadius: '3px',
                                 color: '#4b5563'
                               }}
@@ -641,11 +648,11 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
 
       <div className="notes-content-wrapper">
         {error && (
-          <div style={{ 
-            padding: '1rem', 
-            backgroundColor: '#fee2e2', 
-            color: '#991b1b', 
-            borderRadius: '8px', 
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#fee2e2',
+            color: '#991b1b',
+            borderRadius: '8px',
             margin: '1rem',
             position: 'absolute',
             top: 0,
@@ -656,7 +663,7 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
             {error}
           </div>
         )}
-        
+
         {/* Collapsible Notes Sidebar */}
         <aside className={`notes-sidebar ${notesSidebarCollapsed ? 'collapsed' : ''}`}>
           {!notesSidebarCollapsed && (
@@ -885,11 +892,11 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
                 )}
               </>
             ) : (
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
                 height: '50vh',
                 color: '#6b7280'
               }}>
@@ -929,7 +936,7 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
             </div>
           )}
 
-          {/* AI Chat Panel */}
+                    {/* AI Chat Panel */}
           {showAIChat && (
             <div className="ai-chat-panel">
               <div className="ai-chat-header">
@@ -975,6 +982,82 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
                 >
                   <Send size={18} />
                 </button>
+              </div>
+
+              {/* AI summary + export */}
+              <div style={{ padding: 16, borderTop: '1px solid #eee', marginTop: 12 }}>
+                <button
+                  disabled={isGenerating || !activeNote || activeNote.id.startsWith('placeholder')}
+                  onClick={async () => {
+                    if (!activeNote) return;
+                    setIsGenerating(true);
+                    try {
+                      const res = await fetch(
+                        `/api/users/${DEFAULT_USER_ID}/generate-ai-note`,
+                        {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ note_id: activeNote.id }),
+                        }
+                      );
+                      if (res.ok) {
+                        const data = await res.json();
+                        setAISummary(data.summary || '');
+                        setAIQuestions(data.questions || data.exam_questions || '');
+                      } else {
+                        alert('Failed to generate summary');
+                      }
+                    } finally {
+                      setIsGenerating(false);
+                    }
+                  }}
+                >
+                  {isGenerating ? 'Generating...' : 'Generate Summary Notes'}
+                </button>
+
+                {(aiSummary || aiQuestions) && (
+                  <div style={{ marginTop: 12 }}>
+                    <h3>Summary</h3>
+                    <textarea
+                      value={aiSummary}
+                      onChange={(e) => setAISummary(e.target.value)}
+                      rows={6}
+                      style={{ width: '100%' }}
+                    />
+
+                    <h3>Exam Questions</h3>
+                    <textarea
+                      value={aiQuestions}
+                      onChange={(e) => setAIQuestions(e.target.value)}
+                      rows={4}
+                      style={{ width: '100%' }}
+                    />
+
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        onClick={() =>
+                          window.open(
+                            `/api/notes/${activeNote?.id}/export?format=pdf`,
+                            '_blank'
+                          )
+                        }
+                      >
+                        Export PDF
+                      </button>
+                      <button
+                        onClick={() =>
+                          window.open(
+                            `/api/notes/${activeNote?.id}/export?format=docx`,
+                            '_blank'
+                          )
+                        }
+                        style={{ marginLeft: 8 }}
+                      >
+                        Export DOCX
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
