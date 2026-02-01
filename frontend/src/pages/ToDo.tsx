@@ -63,9 +63,11 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 interface ToDoProps {
     onNavigate: (page: Page) => void;
     graphService?: GraphService | null;
+    viewMode?: 'student' | 'professor';
+    onViewModeToggle?: () => void;
 }
 
-const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService }) => {
+const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService, viewMode = 'student', onViewModeToggle }) => {
     const [mainSidebarTab, setMainSidebarTab] = useState('todo');
     const [selectedList, setSelectedList] = useState<string>('my-day');
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -101,8 +103,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService }) => {
     // Transform Microsoft Task to our Task format
     const transformMicrosoftTask = (
         msTask: MicrosoftTask,
-        listId: string,
-        microsoftListId: string
+        listId: string
     ): Task => {
         return {
             id: `ms-${msTask.id}`,
@@ -180,7 +181,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService }) => {
                 'personal': 'home',
             };
 
-            msLists.forEach((msList) => {
+            msLists.forEach((msList: MicrosoftTaskList) => {
                 const listName = msList.displayName.toLowerCase();
                 const icon = listIconMap[listName] || 'target';
                 
@@ -199,8 +200,8 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService }) => {
             for (const list of updatedLists) {
                 if (list.microsoftId) {
                     const msTasks = await graphService.getTasks(list.microsoftId);
-                    const transformedTasks = msTasks.map((msTask) =>
-                        transformMicrosoftTask(msTask, list.id, list.microsoftId!)
+                    const transformedTasks = msTasks.map((msTask: MicrosoftTask) =>
+                        transformMicrosoftTask(msTask, list.id)
                     );
                     allMsTasks.push(...transformedTasks);
                 }

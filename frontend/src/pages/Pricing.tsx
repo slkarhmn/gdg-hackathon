@@ -23,7 +23,7 @@ interface PricingProps {
   onSignIn?: () => void;
 }
 
-const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
+const Pricing: React.FC<PricingProps> = ({ onSignIn }) => {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
 
   // ✅ FIXED: Removed unused variable 'plan' - using underscore to indicate intentionally unused

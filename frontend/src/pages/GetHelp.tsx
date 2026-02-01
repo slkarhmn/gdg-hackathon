@@ -10,8 +10,6 @@ import {
     AlertCircle,
     LogOut
 } from 'lucide-react';
-// ✅ FIXED: Removed unused import
-// import { useAIChat } from '../contexts/AIChatContext';
 import './GetHelp.css';
 import { useAuth } from '../auth/AuthContext';
 
@@ -42,8 +40,7 @@ interface GetHelpProps {
     onViewModeToggle?: () => void;
 }
 
-const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
-    // ✅ FIXED: Use AuthContext instead of localStorage directly
+const GetHelp: React.FC<GetHelpProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle }) => {
     const { getAccessToken, logout, isAuthenticated } = useAuth();
     
     const [mainSidebarTab, setMainSidebarTab] = useState('help');
@@ -79,7 +76,6 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
             setError(null);
             setPermissionError(false);
 
-            // ✅ FIXED: Get fresh token from MSAL
             const token = await getAccessToken();
             if (!token) {
                 setError('Not authenticated. Please sign in with Microsoft.');
@@ -102,7 +98,6 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
                 const errorText = await response.text();
                 console.error('❌ Chats error:', errorText);
                 
-                // Check if it's a 403 Forbidden error (permissions issue)
                 if (response.status === 403) {
                     setPermissionError(true);
                     throw new Error('Permission denied. You need to sign out and sign in again to grant chat access permissions.');
@@ -128,7 +123,6 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
             setIsLoadingMessages(true);
             setError(null);
 
-            // ✅ FIXED: Get fresh token from MSAL
             const token = await getAccessToken();
             if (!token) return;
 
@@ -146,7 +140,6 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
             const data = await response.json();
             const teamsMessages = data.messages || [];
 
-            // Convert to our format
             const formattedMessages: Message[] = teamsMessages.reverse().map((msg: any) => ({
                 id: msg.id,
                 sender: msg.from?.user?.displayName === 'You' ? 'user' : 'other',
@@ -171,7 +164,6 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
             setIsSending(true);
             setError(null);
 
-            // ✅ FIXED: Get fresh token from MSAL
             const token = await getAccessToken();
             if (!token) {
                 setError('Not authenticated.');
@@ -196,7 +188,6 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
 
             setMessageInput('');
 
-            // Refresh messages
             setTimeout(() => {
                 fetchMessages(selectedChatId);
             }, 500);
@@ -221,8 +212,13 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
     };
 
     const handleForceRelogin = () => {
-        // Clear tokens and sign out via MSAL
         logout();
+    };
+
+    // ✅ ADDED: Handler for tab changes
+    const handleTabChange = (tab: string) => {
+        setMainSidebarTab(tab);
+        onNavigate(tab as Page);
     };
 
     const stripHtml = (html: string): string => {
@@ -265,8 +261,13 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
 
     return (
         <div className="get-help-container">
-            {/* ✅ FIXED: Removed onTabChange prop - pass onNavigate with correct callback */}
-            <Sidebar activeTab={mainSidebarTab} onNavigate={onNavigate} />
+            {/* ✅ FIXED: Pass setActiveTab instead of onNavigate, and added viewMode props */}
+            <Sidebar 
+                activeTab={mainSidebarTab} 
+                setActiveTab={handleTabChange}
+                viewMode={viewMode}
+                onViewModeToggle={onViewModeToggle}
+            />
             
             <div className="get-help-content">
                 <div className="get-help-header">

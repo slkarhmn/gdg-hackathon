@@ -1,5 +1,34 @@
 import { graphConfig } from './authConfig';
 
+// Type definitions for Microsoft Graph API responses
+export interface MicrosoftTask {
+  id: string;
+  title: string;
+  status: 'notStarted' | 'inProgress' | 'completed' | 'waitingOnOthers' | 'deferred';
+  importance: 'low' | 'normal' | 'high';
+  body?: {
+    content: string;
+    contentType: string;
+  };
+  dueDateTime?: {
+    dateTime: string;
+    timeZone: string;
+  };
+  reminderDateTime?: {
+    dateTime: string;
+    timeZone: string;
+  };
+  isReminderOn?: boolean;
+}
+
+export interface MicrosoftTaskList {
+  id: string;
+  displayName: string;
+  isOwner: boolean;
+  isShared: boolean;
+  wellknownListName: string;
+}
+
 // Microsoft Graph API Service
 // Provides functions to interact with Microsoft To Do and Outlook
 

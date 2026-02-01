@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
-  FolderOpen,
   FileText,
   ChevronRight,
   ChevronDown,
@@ -447,7 +446,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
   // Toggle week expansion and load resources if needed - FIXED: Fetch from API
   const handleWeekToggle = async (courseId: number, weekNumber: number) => {
     const weekKey = `${courseId}-${weekNumber}`;
-    const isCurrentlyExpanded = expandedWeeks.has(weekKey);
     
     // Toggle expansion state
     setExpandedWeeks(prev => {
@@ -482,28 +480,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     }
   };
 
-  const selectWeek = (weekNumber: number) => {
-    setSelectedWeek(selectedWeek === weekNumber ? null : weekNumber);
-  };
-
-  // Get resources for selected course and week - Uses API call via getResources
-  const getCourseResources = async (courseId: number, weekNumber?: number) => {
-    try {
-      return await getResources(DEFAULT_USER_ID, {
-        course_id: courseId.toString(),
-        week_number: weekNumber
-      });
-    } catch (error) {
-      console.error('Failed to fetch course resources:', error);
-      // Fall back to filtering local resources
-      return resources.filter(r => {
-        if (r.course_id !== courseId.toString()) return false;
-        if (weekNumber !== undefined && r.week_number !== weekNumber) return false;
-        return true;
-      });
-    }
-  };
-
   const generateQuiz = async () => {
     if (selectedResources.size === 0 || !recipientEmail) return;
 
@@ -514,7 +490,6 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
         const azureOpenAIEndpoint = 'https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-MODEL/chat/completions?api-version=2024-02-15-preview';
         const azureOpenAIKey = 'YOUR_AZURE_OPENAI_KEY'; // Store securely!
 
-        const _selectedResourcesList = Array.from(selectedResources);
         const course = selectedCourse ? courses.find(c => c.id === selectedCourse) : null;
         
         // Generate quiz with Azure OpenAI
