@@ -17,8 +17,10 @@ from azure.keyvault.secrets import SecretClient
 credential = DefaultAzureCredential()
 client = SecretClient(vault_url="https://graph-api7.vault.azure.net/", credential=credential)
 
-OPENAI_API_KEY = client.get_secret("OPENAI_API_KEY").value
-GRAPH_CLIENT_SECRET = client.get_secret("GRAPH_CLIENT_SECRET").value
+OPENAI_API_KEY = client.get_secret("OPENAI-API-KEY").value
+MICROSOFT_CLIENT_ID = client.get_secret("MICROSOFT-CLIENT-ID").value
+MICROSOFT_CLIENT_SECRET = client.get_secret("MICROSOFT-CLIENT-SECRET").value
+MICROSOFT_TENANT_ID = client.get_secret("MICROSOFT-TENANT-ID").value
 
 from microsoft_routes import register_microsoft_routes
 from ai_notes import (
