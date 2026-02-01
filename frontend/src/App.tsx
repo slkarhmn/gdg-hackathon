@@ -95,7 +95,7 @@ function AppContent() {
             margin: '0 auto 16px',
           }} />
           <p style={{ color: '#5a5a5a', fontSize: '14px', fontWeight: 500 }}>
-            Loading StudySync...
+            Loading Productive...
           </p>
         </div>
       </div>

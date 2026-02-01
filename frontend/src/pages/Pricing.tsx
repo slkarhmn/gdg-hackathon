@@ -119,7 +119,7 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
       <div className="pricing-header">
         <div className="pricing-header-content">
           <a href="/" className="back-link">
-            â† Back to Home
+             Back to Home
           </a>
           <div className="header-badge">
             <Sparkles size={16} />
@@ -300,7 +300,7 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
 
       {/* Trust Section */}
       <div className="trust-section">
-        <h2>Why Choose StudySync?</h2>
+        <h2>Why Choose Productive?</h2>
         <div className="trust-grid">
           <div className="trust-item">
             <div className="trust-icon">
@@ -359,7 +359,7 @@ const Pricing: React.FC<PricingProps> = ({ onNavigate, onSignIn }) => {
       {/* CTA Footer */}
       <div className="pricing-cta">
         <h2>Ready to Transform Your Studying?</h2>
-        <p>Join thousands of students already using StudySync</p>
+        <p>Join thousands of students already using Productive</p>
         <button className="cta-large" onClick={() => handleGetStarted('Premium')}>
           Start Free Trial
         </button>
