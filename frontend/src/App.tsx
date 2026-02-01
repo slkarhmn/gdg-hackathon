@@ -10,6 +10,7 @@ import Calendar from './pages/Calendar';
 import ToDo from './pages/ToDo';
 import GetHelp from './pages/GetHelp';
 import ProfessorDashboard from './pages/Professordashboard';
+import Pricing from './pages/Pricing';
 import AuthCallback from './components/AuthCallback';
 import type { BackendNote } from './api';
 import './styles/globals.css';
@@ -25,7 +26,7 @@ export interface OpenTab {
 // Main App Component (wrapped with auth)
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
-  const { isAuthenticated, isLoading, account, getAccessToken } = useAuth();
+  const { isAuthenticated, isLoading, account, getAccessToken, login } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [notesPreloadedNote, setNotesPreloadedNote] = useState<BackendNote | null>(null);
   
@@ -33,8 +34,8 @@ function AppContent() {
   const [notesOpenTabs, setNotesOpenTabs] = useState<OpenTab[]>([]);
   const [notesActiveTabId, setNotesActiveTabId] = useState<string>('');
   
-  // Check if user is professor/admin (you can customize this logic)
-  const isProfessor = true; // Set to true for demo, or check account.jobTitle, account.roles, etc.
+  // Check if user is professor/admin
+  const isProfessor = true;
 
   // Get access token when user is authenticated
   useEffect(() => {
@@ -68,6 +69,11 @@ function AppContent() {
     setNotesActiveTabId(tabId);
   }, []);
 
+  // Allow access to pricing page without authentication (check first, before loading screen)
+  if (currentPage === 'pricing') {
+    return <Pricing onNavigate={handleNavigate} onSignIn={login} />;
+  }
+
   // Show loading screen while checking authentication
   if (isLoading) {
     return (
@@ -98,7 +104,7 @@ function AppContent() {
 
   // Show login page if not authenticated
   if (!isAuthenticated) {
-    return <Login />;
+    return <Login onNavigate={handleNavigate} />;
   }
 
   // Render appropriate page
@@ -131,11 +137,13 @@ function AppContent() {
         return <Calendar onNavigate={handleNavigate} {...pageProps} />;
       case 'files':
       case 'todo':
-        return <ToDo onNavigate={handleNavigate} {...pageProps} />;
+        return <ToDo onNavigate={handleNavigate} graphService={graphService} />;
       case 'help':
         return <GetHelp onNavigate={handleNavigate} {...pageProps} />;
       case 'professor':
         return <ProfessorDashboard onNavigate={handleNavigate} {...pageProps} />;
+      case 'pricing':
+        return <Pricing onNavigate={handleNavigate} onSignIn={login} />;
       default:
         return <Dashboard onNavigate={handleNavigate} {...pageProps} />;
     }
@@ -151,6 +159,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/pricing" element={<AppContent />} />
           <Route path="*" element={<AppContent />} />
         </Routes>
       </BrowserRouter>
