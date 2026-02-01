@@ -875,7 +875,6 @@
 
 /* =================================
    Resources Section Styles
-================================= */
 
 .header-action-btn.primary {
   background: linear-gradient(135deg, #6B9080 0%, #5E8779 100%);
@@ -1158,7 +1157,6 @@
 /* =================================
    STANDARDIZED UPLOAD BUTTON STYLES
    All upload buttons now have the same styling
-================================= */
 
 .upload-resource-btn,
 .upload-resource-btn-bottom,
@@ -1228,7 +1226,6 @@
 
 /* =================================
    Upload Modal Styles
-================================= */
 
 .modal-overlay {
   position: fixed;
@@ -1478,7 +1475,6 @@
 
 /* =================================
    Resource Viewer Modal Styles
-================================= */
 
 .resource-viewer-modal {
   width: 95%;
@@ -1703,7 +1699,6 @@
 
 /* =================================
    Course Management Styles
-================================= */
 
 /* Loading and Empty States */
 .loading-courses {

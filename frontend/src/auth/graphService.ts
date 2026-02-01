@@ -1,7 +1,7 @@
-/**
- * Microsoft Graph Service
- * Handles all Microsoft Graph API calls including Calendar and To Do
- */
+import { graphConfig } from './authConfig';
+
+// Microsoft Graph API Service
+// Provides functions to interact with Microsoft To Do and Outlook
 
 export class GraphService {
   private accessToken: string;
@@ -10,289 +10,164 @@ export class GraphService {
     this.accessToken = accessToken;
   }
 
-  // ==================== Calendar Methods ====================
-
-  async getCalendarEvents(startDateTime: string, endDateTime: string): Promise<unknown[]> {
-    try {
-      const response = await fetch(
-        `https://graph.microsoft.com/v1.0/me/calendar/calendarView?startDateTime=${startDateTime}&endDateTime=${endDateTime}`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch calendar events: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.value || [];
-    } catch (error) {
-      console.error('Error fetching calendar events:', error);
-      return [];
-    }
-  }
-
-  // ==================== Microsoft To Do Methods ====================
-
-  /**
-   * Get all To Do task lists for the user
-   */
-  async getTaskLists(): Promise<MicrosoftTaskList[]> {
-    try {
-      const response = await fetch(
-        'https://graph.microsoft.com/v1.0/me/todo/lists',
-        {
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch task lists: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.value || [];
-    } catch (error) {
-      console.error('Error fetching task lists:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get tasks from a specific list
-   */
-  async getTasks(listId: string): Promise<MicrosoftTask[]> {
-    try {
-      const response = await fetch(
-        `https://graph.microsoft.com/v1.0/me/todo/lists/${listId}/tasks`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch tasks: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.value || [];
-    } catch (error) {
-      console.error('Error fetching tasks:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get all tasks from all lists
-   */
-  async getAllTasks(): Promise<{ listId: string; listName: string; tasks: MicrosoftTask[] }[]> {
-    try {
-      const lists = await this.getTaskLists();
-      const allTasks = await Promise.all(
-        lists.map(async (list) => ({
-          listId: list.id,
-          listName: list.displayName,
-          tasks: await this.getTasks(list.id),
-        }))
-      );
-      return allTasks;
-    } catch (error) {
-      console.error('Error fetching all tasks:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Create a new task in a list
-   */
-  async createTask(
-    listId: string,
-    task: {
-      title: string;
-      body?: { content: string; contentType: string };
-      dueDateTime?: { dateTime: string; timeZone: string };
-      reminderDateTime?: { dateTime: string; timeZone: string };
-      importance?: 'low' | 'normal' | 'high';
-      isReminderOn?: boolean;
-    }
-  ): Promise<MicrosoftTask> {
-    try {
-      const response = await fetch(
-        `https://graph.microsoft.com/v1.0/me/todo/lists/${listId}/tasks`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(task),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create task: ${response.statusText} - ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error creating task:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Update a task
-   */
-  async updateTask(
-    listId: string,
-    taskId: string,
-    updates: {
-      title?: string;
-      status?: 'notStarted' | 'inProgress' | 'completed' | 'waitingOnOthers' | 'deferred';
-      body?: { content: string; contentType: string };
-      dueDateTime?: { dateTime: string; timeZone: string } | null;
-      reminderDateTime?: { dateTime: string; timeZone: string } | null;
-      importance?: 'low' | 'normal' | 'high';
-      isReminderOn?: boolean;
-    }
-  ): Promise<MicrosoftTask> {
-    try {
-      const response = await fetch(
-        `https://graph.microsoft.com/v1.0/me/todo/lists/${listId}/tasks/${taskId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(updates),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to update task: ${response.statusText} - ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error updating task:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete a task
-   */
-  async deleteTask(listId: string, taskId: string): Promise<void> {
-    try {
-      const response = await fetch(
-        `https://graph.microsoft.com/v1.0/me/todo/lists/${listId}/tasks/${taskId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to delete task: ${response.statusText}`);
-      }
-    } catch (error) {
-      console.error('Error deleting task:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Create a new task list
-   */
-  async createTaskList(displayName: string): Promise<MicrosoftTaskList> {
-    try {
-      const response = await fetch(
-        'https://graph.microsoft.com/v1.0/me/todo/lists',
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ displayName }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create task list: ${response.statusText} - ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error creating task list:', error);
-      throw error;
-    }
-  }
-}
-
-// ==================== Type Definitions ====================
-
-export interface MicrosoftTaskList {
-  id: string;
-  displayName: string;
-  isOwner: boolean;
-  isShared: boolean;
-  wellknownListName: string;
-}
-
-export interface MicrosoftTask {
-  id: string;
-  title: string;
-  status: 'notStarted' | 'inProgress' | 'completed' | 'waitingOnOthers' | 'deferred';
-  importance: 'low' | 'normal' | 'high';
-  isReminderOn: boolean;
-  createdDateTime: string;
-  lastModifiedDateTime: string;
-  body?: {
-    content: string;
-    contentType: string;
-  };
-  dueDateTime?: {
-    dateTime: string;
-    timeZone: string;
-  };
-  reminderDateTime?: {
-    dateTime: string;
-    timeZone: string;
-  };
-  recurrence?: {
-    pattern: {
-      type: string;
-      interval: number;
+  // Helper method for making Graph API calls
+  private async callGraphAPI(endpoint: string, method: string = 'GET', body?: Record<string, unknown>) {
+    const headers: HeadersInit = {
+      Authorization: `Bearer ${this.accessToken}`,
+      'Content-Type': 'application/json',
     };
-    range: {
-      type: string;
-      startDate: string;
+
+    const options: RequestInit = {
+      method,
+      headers,
     };
-  };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(endpoint, options);
+    
+    if (!response.ok) {
+      throw new Error(`Graph API error: ${response.status} ${response.statusText}`);
+    }
+
+    // DELETE responses have no body
+    if (method === 'DELETE') return undefined;
+
+    return response.json();
+  }
+
+  // Paginated fetcher: follows @odata.nextLink until all pages are collected.
+  // Graph API returns at most 10 events per page by default, so without this
+  // you would silently lose events beyond the first page.
+  private async callGraphAPIPaginated(endpoint: string): Promise<Record<string, unknown>[]> {
+    let url: string | null = endpoint;
+    const results: Record<string, unknown>[] = [];
+
+    while (url) {
+      const page = await this.callGraphAPI(url);
+      if (Array.isArray(page.value)) {
+        results.push(...page.value);
+      }
+      // Graph sends the next page URL here; undefined when there are no more pages.
+      url = (page['@odata.nextLink'] as string) ?? null;
+    }
+
+    return results;
+  }
+
+  // USER PROFILE
+  async getUserProfile() {
+    return this.callGraphAPI(graphConfig.graphMeEndpoint);
+  }
+
+  // MICROSOFT TO DO
+  
+  // Get all task lists
+  async getTaskLists() {
+    const response = await this.callGraphAPI(graphConfig.graphTasksEndpoint);
+    return response.value;
+  }
+
+  // Get tasks from a specific list
+  async getTasks(listId: string) {
+    const endpoint = `${graphConfig.graphTasksEndpoint}/${listId}/tasks`;
+    const response = await this.callGraphAPI(endpoint);
+    return response.value;
+  }
+
+  // Create a new task
+  async createTask(listId: string, task: {
+    title: string;
+    body?: { content: string; contentType: string };
+    dueDateTime?: { dateTime: string; timeZone: string };
+    reminderDateTime?: { dateTime: string; timeZone: string };
+    importance?: 'low' | 'normal' | 'high';
+  }) {
+    const endpoint = `${graphConfig.graphTasksEndpoint}/${listId}/tasks`;
+    return this.callGraphAPI(endpoint, 'POST', task);
+  }
+
+  // Update a task
+  async updateTask(listId: string, taskId: string, updates: Record<string, unknown>) {
+    const endpoint = `${graphConfig.graphTasksEndpoint}/${listId}/tasks/${taskId}`;
+    return this.callGraphAPI(endpoint, 'PATCH', updates);
+  }
+
+  // Delete a task
+  async deleteTask(listId: string, taskId: string) {
+    const endpoint = `${graphConfig.graphTasksEndpoint}/${listId}/tasks/${taskId}`;
+    return this.callGraphAPI(endpoint, 'DELETE');
+  }
+
+  // Mark task as complete
+  async completeTask(listId: string, taskId: string) {
+    return this.updateTask(listId, taskId, { status: 'completed' });
+  }
+
+  // OUTLOOK CALENDAR
+
+  // Get calendar events for a date range.
+  // Uses $orderby so results come back chronologically, and paginates
+  // automatically so no events are dropped.
+  async getCalendarEvents(startDate?: string, endDate?: string): Promise<Record<string, unknown>[]> {
+    let endpoint = graphConfig.graphCalendarEndpoint;
+    
+    if (startDate && endDate) {
+      // Use 'lt' (less-than) on end so that events finishing exactly at the
+      // boundary are still included; the previous 'le' (less-or-equal) on
+      // end/dateTime would exclude an event whose start equals that value.
+      endpoint += `?$filter=start/dateTime ge '${startDate}' and end/dateTime lt '${endDate}'&$orderby=start/dateTime asc`;
+    }
+
+    return this.callGraphAPIPaginated(endpoint);
+  }
+
+  // Create a calendar event
+  async createCalendarEvent(event: {
+    subject: string;
+    body?: { contentType: string; content: string };
+    start: { dateTime: string; timeZone: string };
+    end: { dateTime: string; timeZone: string };
+    location?: { displayName: string };
+    attendees?: Array<{ emailAddress: { address: string; name?: string } }>;
+    reminderMinutesBeforeStart?: number;
+  }) {
+    return this.callGraphAPI(graphConfig.graphCalendarEndpoint, 'POST', event);
+  }
+
+  // Update a calendar event
+  async updateCalendarEvent(eventId: string, updates: Record<string, unknown>) {
+    const endpoint = `${graphConfig.graphCalendarEndpoint}/${eventId}`;
+    return this.callGraphAPI(endpoint, 'PATCH', updates);
+  }
+
+  // Delete a calendar event
+  async deleteCalendarEvent(eventId: string) {
+    const endpoint = `${graphConfig.graphCalendarEndpoint}/${eventId}`;
+    return this.callGraphAPI(endpoint, 'DELETE');
+  }
+
+  // OUTLOOK MAIL (optional)
+
+  // Get recent emails
+  async getRecentEmails(count: number = 10) {
+    const endpoint = `${graphConfig.graphMailEndpoint}?$top=${count}&$select=subject,from,receivedDateTime,isRead,bodyPreview`;
+    const response = await this.callGraphAPI(endpoint);
+    return response.value;
+  }
+
+  // Search emails
+  async searchEmails(query: string) {
+    const endpoint = `${graphConfig.graphMailEndpoint}?$search="${query}"&$select=subject,from,receivedDateTime,bodyPreview`;
+    const response = await this.callGraphAPI(endpoint);
+    return response.value;
+  }
 }
 
-/**
- * React hook to use GraphService with auto-refresh
- */
-import { useMemo } from 'react';
-
-export function useGraphService(accessToken: string | null): GraphService | null {
-  return useMemo(() => {
-    if (!accessToken) return null;
-    return new GraphService(accessToken);
-  }, [accessToken]);
-}
+// Hook for using Graph Service
+export const useGraphService = (accessToken: string | null) => {
+  if (!accessToken) return null;
+  return new GraphService(accessToken);
+};

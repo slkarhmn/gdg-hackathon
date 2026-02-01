@@ -373,6 +373,9 @@ ns_resources = Namespace('resources', description='Resource/lecture material ope
 ns_courses = Namespace('courses', description='Course operations')
 ns_chat = Namespace('chat', description='AI Chat operations with context management')
 
+# AI namespace — imported from ai_routes.py
+from ai_routes import ns_ai
+
 api.add_namespace(ns_users, path='/api/users')
 api.add_namespace(ns_notes, path='/api/notes')
 api.add_namespace(ns_study_plans, path='/api/study-plans')
