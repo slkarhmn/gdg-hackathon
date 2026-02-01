@@ -50,25 +50,18 @@ jobs:
           name: frontend-build
           path: frontend/dist/
 
-      # ─── Deploy via SSH to Azure VM ───────────────────────────
-      - name: Deploy to Azure VM
+      # ─── Create deploy directory on VM ────────────────────────
+      - name: Create deploy directory on VM
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.AZURE_VM_IP }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
           script: |
-            set -e
-
-            APP_DIR="/opt/myapp"
-            DEPLOY_DIR="/tmp/deploy_$$"
-
-            # ─── Create a temp staging directory ────────────────
-            mkdir -p "$DEPLOY_DIR"
-
-            # ─── Copy files from the runner to the VM ───────────
-            # (handled below via scp step)
-            echo "SSH connection established"
+            rm -rf /tmp/deploy
+            mkdir -p /tmp/deploy/backend
+            mkdir -p /tmp/deploy/frontend/dist
+            echo "Deploy directory created"
 
       # ─── SCP: Copy backend files ──────────────────────────────
       - name: Copy backend files to VM
@@ -77,8 +70,9 @@ jobs:
           host: ${{ secrets.AZURE_VM_IP }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
-          source: "backend/"
+          source: "backend/*"
           target: "/tmp/deploy/backend/"
+          strip_components: 1
 
       # ─── SCP: Copy frontend build ─────────────────────────────
       - name: Copy frontend build to VM
@@ -87,8 +81,9 @@ jobs:
           host: ${{ secrets.AZURE_VM_IP }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
-          source: "frontend/dist/"
+          source: "frontend/dist/*"
           target: "/tmp/deploy/frontend/dist/"
+          strip_components: 2
 
       # ─── SCP: Copy deploy script ──────────────────────────────
       - name: Copy deploy script to VM
@@ -99,6 +94,7 @@ jobs:
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
           source: "deploy/setup.sh"
           target: "/tmp/deploy/"
+          strip_components: 1
 
       # ─── Run remote deploy script ─────────────────────────────
       - name: Run deployment script on VM
@@ -119,6 +115,6 @@ jobs:
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
           script: |
-            sleep 3
+            sleep 5
             curl -f http://localhost:5000/ || { echo "Health check failed!"; exit 1; }
             echo "✅ Deployment successful and app is running."
