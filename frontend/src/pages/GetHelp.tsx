@@ -10,8 +10,11 @@ import {
     ChevronRight,
     User,
     CheckCircle2,
-    Circle
+    Circle,
+    Sparkles,
+    X
 } from 'lucide-react';
+import { useAIChat } from '../contexts/AIChatContext';
 import './GetHelp.css';
 
 interface Professor {
@@ -53,6 +56,9 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate, viewMode = 'student', onV
     const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
     const [messageInput, setMessageInput] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [showAIChat, setShowAIChat] = useState(false);
+    const [aiInput, setAIInput] = useState('');
+    const { messages: aiMessages, isLoading: aiLoading, sendMessage: sendAIMessage } = useAIChat();
 
     const [professors] = useState<Professor[]>([
         {
@@ -215,6 +221,64 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate, viewMode = 'student', onV
     return (
         <div className="help-page-container">
             <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
+
+            {/* AI Help FAB - same unified chat as Notes/Grades */}
+            <button
+                className="ai-help-fab"
+                onClick={() => setShowAIChat(!showAIChat)}
+                title="Ask AI for Help"
+                style={{
+                    position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
+                    width: 56, height: 56, borderRadius: '50%', border: 'none',
+                    background: 'linear-gradient(135deg, #6B9080 0%, #A4C3B2 100%)',
+                    color: 'white', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+            >
+                <Sparkles size={24} />
+            </button>
+
+            {showAIChat && (
+                <div className="ai-chat-panel" style={{
+                    position: 'fixed', bottom: 90, right: 24, zIndex: 999, width: 360, maxHeight: 480,
+                    background: 'white', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                    display: 'flex', flexDirection: 'column', overflow: 'hidden'
+                }}>
+                    <div style={{ padding: 16, borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h3 style={{ margin: 0 }}>AI Assistant</h3>
+                        <button onClick={() => setShowAIChat(false)} aria-label="Close"><X size={18} /></button>
+                    </div>
+                    <div style={{ flex: 1, overflow: 'auto', padding: 12, minHeight: 200 }}>
+                        {aiMessages.length === 0 && !aiLoading ? (
+                            <p style={{ color: '#6b7280', fontSize: 14 }}>Ask me anything about your courses or assignments.</p>
+                        ) : (
+                            aiMessages.map((msg, idx) => (
+                                <div key={idx} style={{ marginBottom: 8 }}>
+                                    <strong>{msg.role === 'user' ? 'You' : 'AI'}:</strong> {msg.text}
+                                </div>
+                            ))
+                        )}
+                        {aiLoading && <p style={{ opacity: 0.7 }}>Thinking...</p>}
+                    </div>
+                    <div style={{ padding: 12, borderTop: '1px solid #eee', display: 'flex', gap: 8 }}>
+                        <input
+                            type="text"
+                            placeholder="Ask a question..."
+                            value={aiInput}
+                            onChange={(e) => setAIInput(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && aiInput.trim() && (sendAIMessage(aiInput.trim(), 'help'), setAIInput(''))}
+                            disabled={aiLoading}
+                            style={{ flex: 1, padding: 10, borderRadius: 8, border: '1px solid #ddd' }}
+                        />
+                        <button
+                            onClick={() => aiInput.trim() && (sendAIMessage(aiInput.trim(), 'help'), setAIInput(''))}
+                            disabled={!aiInput.trim() || aiLoading}
+                        >
+                            <Send size={18} />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             <div className="help-content-wrapper">
                 {/* Professors Sidebar */}

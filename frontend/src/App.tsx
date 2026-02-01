@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { useGraphService } from './auth/graphService';
+import { AIChatProvider } from './contexts/AIChatContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Notes from './pages/Notes';
@@ -153,7 +154,11 @@ function AppContent() {
     }
   };
 
-  return <div className="App">{renderPage()}</div>;
+  return (
+    <AIChatProvider>
+      <div className="App">{renderPage()}</div>
+    </AIChatProvider>
+  );
 }
 
 // Root App with AuthProvider

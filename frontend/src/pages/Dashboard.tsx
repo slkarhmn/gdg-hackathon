@@ -31,8 +31,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, viewMode = 'student',
   const [longestStreak, setLongestStreak] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [userName, setUserName] = useState('User'); // Add this state
-  const { getAccessToken } = useAuth(); // Add this hook
+  const [userName, setUserName] = useState('User');
+  const { account, isGuest, getAccessToken } = useAuth();
 
   const [todos, setTodos] = useState<TodoItem[]>([
     { id: 1, text: 'get up in the morning', completed: false },
@@ -57,6 +57,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, viewMode = 'student',
 
   // Fetch user profile - separate useEffect
   useEffect(() => {
+    if (isGuest && account?.name) {
+      setUserName(account.name);
+      return;
+    }
     const fetchUserProfile = async () => {
       try {
         const token = await getAccessToken();
@@ -71,7 +75,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, viewMode = 'student',
     };
 
     fetchUserProfile();
-  }, [getAccessToken]);
+  }, [getAccessToken, isGuest, account?.name]);
 
   // Fetch dashboard data
   useEffect(() => {

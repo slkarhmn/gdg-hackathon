@@ -27,6 +27,7 @@ import {
   createAssignment
 } from '../api';
 import { DEFAULT_USER_ID } from '../api/config';
+import { useAIChat } from '../contexts/AIChatContext';
 import type {
   BackendAssignment,
   BackendNote,
@@ -135,6 +136,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate, viewMode = 'student', onVie
   const [addForm, setAddForm] = useState({ title: '', dueDate: '', course: '', weight: '10' });
   const [showGradeCalculator, setShowGradeCalculator] = useState(false);
   const [aiQuestion, setAiQuestion] = useState('');
+  const { messages: aiMessages, isLoading: aiLoading, sendMessage: sendAIMessage } = useAIChat();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'upcoming' | 'completed'>('all');
   const [loading, setLoading] = useState(true);
@@ -756,7 +758,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate, viewMode = 'student', onVie
                         onChange={(e) => setAiQuestion(e.target.value)}
                         onKeyPress={(e) => {
                           if (e.key === 'Enter' && aiQuestion.trim()) {
-                            console.log('AI Question:', aiQuestion);
+                            sendAIMessage(aiQuestion.trim(), `grades:assignment:${selectedAssignment.title}`);
                             setAiQuestion('');
                           }
                         }}
@@ -765,21 +767,46 @@ const Grades: React.FC<GradesProps> = ({ onNavigate, viewMode = 'student', onVie
                         className="ai-send-btn"
                         onClick={() => {
                           if (aiQuestion.trim()) {
-                            console.log('AI Question:', aiQuestion);
+                            sendAIMessage(aiQuestion.trim(), `grades:assignment:${selectedAssignment.title}`);
                             setAiQuestion('');
                           }
                         }}
-                        disabled={!aiQuestion.trim()}
+                        disabled={!aiQuestion.trim() || aiLoading}
                       >
                         <Send size={16} />
                       </button>
                     </div>
                     <div className="ai-suggestions">
                       <span className="suggestion-label">Suggestions:</span>
-                      <button className="suggestion-chip">Explain key concepts</button>
-                      <button className="suggestion-chip">Study tips</button>
-                      <button className="suggestion-chip">Common mistakes</button>
+                      <button
+                        className="suggestion-chip"
+                        onClick={() => sendAIMessage('Explain key concepts for this assignment', `grades:assignment:${selectedAssignment.title}`)}
+                      >
+                        Explain key concepts
+                      </button>
+                      <button
+                        className="suggestion-chip"
+                        onClick={() => sendAIMessage('What study tips do you have for this assignment?', `grades:assignment:${selectedAssignment.title}`)}
+                      >
+                        Study tips
+                      </button>
+                      <button
+                        className="suggestion-chip"
+                        onClick={() => sendAIMessage('What are common mistakes to avoid?', `grades:assignment:${selectedAssignment.title}`)}
+                      >
+                        Common mistakes
+                      </button>
                     </div>
+                    {aiMessages.length > 0 && (
+                      <div className="ai-chat-responses" style={{ marginTop: 12, padding: 12, background: '#f9fafb', borderRadius: 8 }}>
+                        {aiMessages.map((msg, idx) => (
+                          <div key={idx} style={{ marginBottom: 8 }}>
+                            <strong>{msg.role === 'user' ? 'You' : 'AI'}:</strong> {msg.text}
+                          </div>
+                        ))}
+                        {aiLoading && <div style={{ opacity: 0.7 }}>Thinking...</div>}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

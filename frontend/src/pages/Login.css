@@ -149,6 +149,36 @@
   flex-shrink: 0;
 }
 
+.guest-login-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  margin-top: 12px;
+  background-color: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  color: #5a5a5a;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Inter', sans-serif;
+}
+
+.guest-login-btn:hover:not(:disabled) {
+  background-color: #f9fafb;
+  border-color: #6B9080;
+  color: #6B9080;
+}
+
+.guest-login-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .spinner {
   animation: spin 1s linear infinite;
 }

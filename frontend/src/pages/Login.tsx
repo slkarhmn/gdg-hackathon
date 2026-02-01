@@ -4,7 +4,7 @@ import { Loader2, LogIn } from 'lucide-react';
 import './Login.css';
 
 const Login: React.FC = () => {
-  const { login, isLoading } = useAuth();
+  const { login, loginAsGuest, isLoading } = useAuth();
   const [error, setError] = React.useState<string | null>(null);
 
   const handleLogin = async () => {
@@ -114,8 +114,17 @@ const Login: React.FC = () => {
             )}
           </button>
 
+          <button
+            className="guest-login-btn"
+            onClick={loginAsGuest}
+            disabled={isLoading}
+            type="button"
+          >
+            Continue as guest
+          </button>
+
           <p className="login-info">
-            Sign in with your university Microsoft account to get started
+            Sign in with your university Microsoft account or continue as guest to explore
           </p>
         </div>
 
