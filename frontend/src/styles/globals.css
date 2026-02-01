@@ -559,14 +559,14 @@ body {
 
 .heatmap-months {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 24px;
-  margin-bottom: 16px;
-  margin-left: 60px;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 4px;
+  margin-bottom: 12px;
+  margin-left: 40px;
 }
 
 .month-label {
-  font-size: 13px;
+  font-size: 11px;
   color: var(--text-secondary);
   text-align: center;
   font-weight: 600;
@@ -574,20 +574,20 @@ body {
 
 .heatmap-body {
   display: flex;
-  gap: 16px;
+  gap: 8px;
 }
 
 .heatmap-days {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
   justify-content: space-around;
 }
 
 .day-label {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--text-secondary);
-  height: 18px;
+  height: 12px;
   display: flex;
   align-items: center;
   font-weight: 600;
@@ -596,17 +596,17 @@ body {
 .heatmap-cells {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
 }
 
 .day-row {
   display: flex;
-  gap: 5px;
+  gap: 2px;
 }
 
 .heatmap-cell {
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
   border-radius: 4px;
   transition: all 0.15s ease;
 }
@@ -805,13 +805,13 @@ body {
   margin-bottom: 24px;
 }
 
-/* Full year - 12 months */
+/* Full year - 12 months, 53 weeks */
 .heatmap-months {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-  gap: 8px;
-  margin-bottom: 16px;
-  margin-left: 50px;
+  gap: 4px;
+  margin-bottom: 12px;
+  margin-left: 40px;
 }
 
 .month-label {
@@ -823,20 +823,20 @@ body {
 
 .heatmap-body {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .heatmap-days {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   justify-content: space-around;
 }
 
 .day-label {
   font-size: 10px;
   color: var(--text-secondary);
-  height: 11px;
+  height: 12px;
   display: flex;
   align-items: center;
   font-weight: 600;
@@ -845,12 +845,12 @@ body {
 .heatmap-cells {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .day-row {
   display: flex;
-  gap: 3px;
+  gap: 2px;
 }
 
 /* Smaller cells for full year view */
@@ -908,4 +908,45 @@ body {
 
 .legend-color:hover {
   transform: scale(1.2);
+}
+
+.profile-section {
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.profile-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6B9080, #A4C3B2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.logout-btn {
+  width: 40px;
+  height: 40px;
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.logout-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
 }

@@ -141,7 +141,7 @@ export function heatmapDataFromDailyCounts(
       firstDay.setDate(firstDay.getDate() + 1);
     }
 
-    for (let week = 0; week < 52; week++) {
+    for (let week = 0; week < 53; week++) {
       const currentDate = new Date(firstDay);
       currentDate.setDate(firstDay.getDate() + week * 7);
 

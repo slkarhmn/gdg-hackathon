@@ -44,9 +44,11 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface GetHelpProps {
     onNavigate: (page: Page) => void;
+    viewMode?: 'student' | 'professor';
+    onViewModeToggle?: () => void;
 }
 
-const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
+const GetHelp: React.FC<GetHelpProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle  }) => {
     const [mainSidebarTab, setMainSidebarTab] = useState('help');
     const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
     const [messageInput, setMessageInput] = useState('');
@@ -212,7 +214,7 @@ const GetHelp: React.FC<GetHelpProps> = ({ onNavigate }) => {
 
     return (
         <div className="help-page-container">
-            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+            <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
 
             <div className="help-content-wrapper">
                 {/* Professors Sidebar */}

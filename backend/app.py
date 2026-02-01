@@ -1,10 +1,10 @@
 # from venv import logger
-
 from flask import Flask, request, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_restx import Api, Resource, fields, Namespace
+from flask_restx import Api, Resource as RestxResource, fields, Namespace
 from flask_cors import CORS
 from datetime import datetime, timedelta
+from werkzeug.utils import secure_filename
 import json
 import os
 from ai_notes import (
@@ -26,6 +26,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+import uuid
+import mimetypes
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Import AI chat functionality
+from ai_chat import (
+    initialize_openai,
+    chat_with_ai,
+    end_conversation_session,
+    load_context,
+    clear_context,
+    get_context_stats
+)
+
+# Initialize OpenAI on startup
+try:
+    initialize_openai()
+except Exception as e:
+    print(f"Warning: Could not initialize OpenAI: {e}")
 
 app = Flask(__name__)
 CORS(app)
@@ -36,6 +58,35 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'st
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JSON_SORT_KEYS'] = False
 app.config['RESTX_MASK_SWAGGER'] = False
+
+# File upload configuration
+# Use the resources folder at the project root (one level up from backend)
+RESOURCES_FOLDER = os.path.join(os.path.dirname(basedir), 'resources')
+os.makedirs(RESOURCES_FOLDER, exist_ok=True)
+app.config['RESOURCES_FOLDER'] = RESOURCES_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+
+# Allowed file extensions and their types
+ALLOWED_EXTENSIONS = {
+    'pdf': 'pdf',
+    'doc': 'document', 'docx': 'document', 'txt': 'document', 'rtf': 'document', 'odt': 'document',
+    'ppt': 'document', 'pptx': 'document', 'xls': 'document', 'xlsx': 'document',
+    'mp4': 'video', 'webm': 'video', 'avi': 'video', 'mov': 'video', 'mkv': 'video', 'wmv': 'video',
+    'mp3': 'audio', 'wav': 'audio', 'ogg': 'audio', 'm4a': 'audio', 'flac': 'audio', 'aac': 'audio',
+    'jpg': 'image', 'jpeg': 'image', 'png': 'image', 'gif': 'image', 'webp': 'image', 'svg': 'image',
+    'zip': 'archive', 'rar': 'archive', '7z': 'archive', 'tar': 'archive', 'gz': 'archive'
+}
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def get_file_type(filename):
+    """Get file type category from extension"""
+    if '.' in filename:
+        ext = filename.rsplit('.', 1)[1].lower()
+        return ALLOWED_EXTENSIONS.get(ext, 'other')
+    return 'other'
 
 # Initialize API with Swagger
 api = Api(
@@ -209,6 +260,101 @@ class Tag(db.Model):
         }
 
 
+class Course(db.Model):
+    """Courses table - stores professor courses for organizing resources"""
+    __tablename__ = 'courses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    
+    name = db.Column(db.String(255), nullable=False)
+    code = db.Column(db.String(50), nullable=False)  # e.g., "CS 401"
+    semester = db.Column(db.String(100), nullable=True)  # e.g., "Spring 2026"
+    description = db.Column(db.Text, nullable=True)
+    student_count = db.Column(db.Integer, default=0)
+    total_weeks = db.Column(db.Integer, default=12)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = db.relationship('User', backref=db.backref('courses', lazy='dynamic', cascade='all, delete-orphan'))
+    resources = db.relationship('Resource', backref='course', lazy='dynamic', cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "name": self.name,
+            "code": self.code,
+            "semester": self.semester,
+            "description": self.description,
+            "student_count": self.student_count,
+            "total_weeks": self.total_weeks,
+            "resource_count": self.resources.count() if self.resources else 0,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class Resource(db.Model):
+    """Resources table - stores lecture materials (PDFs, videos, documents, etc.)"""
+    __tablename__ = 'resources'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    
+    # File information
+    filename = db.Column(db.String(255), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(512), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False)  # Size in bytes
+    mime_type = db.Column(db.String(100), nullable=False)
+    file_type = db.Column(db.String(50), nullable=False)  # 'pdf', 'video', 'audio', 'document', 'image', 'other'
+    
+    # Course organization - now references the courses table
+    course_id = db.Column(db.Integer, db.ForeignKey('courses.id'), nullable=True, index=True)
+    week_number = db.Column(db.Integer, nullable=True)
+    
+    # Metadata
+    title = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = db.relationship('User', backref=db.backref('resources', lazy='dynamic', cascade='all, delete-orphan'))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "filename": self.filename,
+            "original_filename": self.original_filename,
+            "file_path": self.file_path,
+            "file_size": self.file_size,
+            "file_size_formatted": self.format_file_size(),
+            "mime_type": self.mime_type,
+            "file_type": self.file_type,
+            "course_id": self.course_id,
+            "course_name": self.course.name if self.course else None,
+            "course_code": self.course.code if self.course else None,
+            "week_number": self.week_number,
+            "title": self.title,
+            "description": self.description,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    def format_file_size(self):
+        """Format file size in human-readable format"""
+        size = self.file_size
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
+
+
 # =============================================================================
 # API MODELS (for Swagger documentation)
 # =============================================================================
@@ -220,6 +366,9 @@ ns_study_plans = Namespace('study-plans', description='Study plan operations')
 ns_spaced_reps = Namespace('spaced-repetitions', description='Spaced repetition operations')
 ns_assignments = Namespace('assignments', description='Assignment operations')
 ns_tags = Namespace('tags', description='Tag operations')
+ns_resources = Namespace('resources', description='Resource/lecture material operations')
+ns_courses = Namespace('courses', description='Course operations')
+ns_chat = Namespace('chat', description='AI Chat operations with context management')
 
 api.add_namespace(ns_users, path='/api/users')
 api.add_namespace(ns_notes, path='/api/notes')
@@ -227,6 +376,10 @@ api.add_namespace(ns_study_plans, path='/api/study-plans')
 api.add_namespace(ns_spaced_reps, path='/api/spaced-repetitions')
 api.add_namespace(ns_assignments, path='/api/assignments')
 api.add_namespace(ns_tags, path='/api/tags')
+api.add_namespace(ns_resources, path='/api/resources')
+api.add_namespace(ns_courses, path='/api/courses')
+api.add_namespace(ns_chat, path='/api/chat')
+
 
 # User models
 user_input = api.model('UserInput', {
@@ -329,13 +482,98 @@ tag_output = api.model('Tag', {
     'created_at': fields.String(description='Creation timestamp')
 })
 
+# Resource models
+resource_output = api.model('Resource', {
+    'id': fields.Integer(description='Resource ID'),
+    'user_id': fields.Integer(description='User ID'),
+    'filename': fields.String(description='Stored filename'),
+    'original_filename': fields.String(description='Original filename'),
+    'file_path': fields.String(description='File path'),
+    'file_size': fields.Integer(description='File size in bytes'),
+    'file_size_formatted': fields.String(description='Human-readable file size'),
+    'mime_type': fields.String(description='MIME type'),
+    'file_type': fields.String(description='File type category'),
+    'course_id': fields.Integer(description='Course ID'),
+    'course_name': fields.String(description='Course name'),
+    'course_code': fields.String(description='Course code'),
+    'week_number': fields.Integer(description='Week number'),
+    'title': fields.String(description='Resource title'),
+    'description': fields.String(description='Resource description'),
+    'created_at': fields.String(description='Creation timestamp'),
+    'updated_at': fields.String(description='Update timestamp')
+})
+
+resource_update_input = api.model('ResourceUpdateInput', {
+    'title': fields.String(description='Resource title'),
+    'description': fields.String(description='Resource description'),
+    'course_id': fields.Integer(description='Course ID'),
+    'week_number': fields.Integer(description='Week number')
+})
+
+# Course models
+course_input = api.model('CourseInput', {
+    'name': fields.String(required=True, description='Course name'),
+    'code': fields.String(required=True, description='Course code (e.g., CS 401)'),
+    'semester': fields.String(description='Semester (e.g., Spring 2026)'),
+    'description': fields.String(description='Course description'),
+    'student_count': fields.Integer(description='Number of enrolled students'),
+    'total_weeks': fields.Integer(description='Total weeks in the course')
+})
+
+course_output = api.model('Course', {
+    'id': fields.Integer(description='Course ID'),
+    'user_id': fields.Integer(description='User ID'),
+    'name': fields.String(description='Course name'),
+    'code': fields.String(description='Course code'),
+    'semester': fields.String(description='Semester'),
+    'description': fields.String(description='Course description'),
+    'student_count': fields.Integer(description='Number of enrolled students'),
+    'total_weeks': fields.Integer(description='Total weeks in the course'),
+    'resource_count': fields.Integer(description='Number of resources in the course'),
+    'created_at': fields.String(description='Creation timestamp'),
+    'updated_at': fields.String(description='Update timestamp')
+})
+
+# Chat models
+chat_message_input = api.model('ChatMessageInput', {
+    'message': fields.String(required=True, description='User message to send to AI'),
+    'conversation_history': fields.Raw(description='Optional conversation history from current session')
+})
+
+chat_response_output = api.model('ChatResponse', {
+    'response': fields.String(description='AI assistant response'),
+    'conversation_history': fields.Raw(description='Updated conversation history'),
+    'tokens_used': fields.Integer(description='Number of tokens used in this request'),
+    'timestamp': fields.String(description='Response timestamp')
+})
+
+chat_session_end_input = api.model('ChatSessionEndInput', {
+    'conversation_history': fields.Raw(required=True, description='Full conversation history to summarize')
+})
+
+context_output = api.model('Context', {
+    'user_id': fields.Integer(description='User ID'),
+    'context_history': fields.Raw(description='List of context summaries'),
+    'created_at': fields.String(description='Context file creation timestamp'),
+    'updated_at': fields.String(description='Last update timestamp')
+})
+
+context_stats_output = api.model('ContextStats', {
+    'user_id': fields.Integer(description='User ID'),
+    'total_entries': fields.Integer(description='Number of context entries'),
+    'created_at': fields.String(description='Context file creation timestamp'),
+    'updated_at': fields.String(description='Last update timestamp'),
+    'oldest_entry': fields.String(description='Timestamp of oldest entry'),
+    'newest_entry': fields.String(description='Timestamp of newest entry')
+})
+
 
 # =============================================================================
 # API ENDPOINTS - USERS
 # =============================================================================
 
 @ns_users.route('')
-class UserList(Resource):
+class UserList(RestxResource):
     @ns_users.doc('create_user')
     @ns_users.expect(user_input)
     @ns_users.marshal_with(user_output, code=201)
@@ -364,7 +602,7 @@ class UserList(Resource):
 
 @ns_users.route('/<int:user_id>')
 @ns_users.param('user_id', 'The user identifier')
-class UserResource(Resource):
+class UserResource(RestxResource):
     @ns_users.doc('get_user')
     @ns_users.marshal_with(user_output)
     def get(self, user_id):
@@ -390,7 +628,7 @@ class UserResource(Resource):
 
 @ns_users.route('/<int:user_id>/notes')
 @ns_users.param('user_id', 'The user identifier')
-class UserNoteList(Resource):
+class UserNoteList(RestxResource):
     @ns_users.doc('get_user_notes')
     @ns_users.marshal_list_with(note_output)
     @ns_users.param('subject', 'Filter by subject')
@@ -399,7 +637,7 @@ class UserNoteList(Resource):
         """Get all notes for a user"""
         user = User.query.get_or_404(user_id)
         
-        subject = request.args.get('subject')
+        subject = request.args.get('subject') 
         tag = request.args.get('tag')
         
         query = user.notes
@@ -455,7 +693,7 @@ class UserNoteList(Resource):
 
 @ns_notes.route('/<int:note_id>')
 @ns_notes.param('note_id', 'The note identifier')
-class NoteResource(Resource):
+class NoteResource(RestxResource):
     @ns_notes.doc('get_note')
     @ns_notes.marshal_with(note_output)
     def get(self, note_id):
@@ -509,7 +747,7 @@ class NoteResource(Resource):
 
 @ns_study_plans.route('/user/<int:user_id>')
 @ns_study_plans.param('user_id', 'The user identifier')
-class StudyPlanResource(Resource):
+class StudyPlanResource(RestxResource):
     @ns_study_plans.doc('get_study_plan')
     @ns_study_plans.marshal_with(study_plan_output)
     def get(self, user_id):
@@ -552,7 +790,7 @@ class StudyPlanResource(Resource):
 
 @ns_study_plans.route('/user/<int:user_id>/generate')
 @ns_study_plans.param('user_id', 'The user identifier')
-class GenerateStudyPlan(Resource):
+class GenerateStudyPlan(RestxResource):
     @ns_study_plans.doc('generate_study_plan')
     @ns_study_plans.expect(generate_plan_input)
     @ns_study_plans.marshal_with(study_plan_output)
@@ -597,7 +835,7 @@ class GenerateStudyPlan(Resource):
 
 @ns_spaced_reps.route('/user/<int:user_id>')
 @ns_spaced_reps.param('user_id', 'The user identifier')
-class SpacedRepList(Resource):
+class SpacedRepList(RestxResource):
     @ns_spaced_reps.doc('get_spaced_repetitions')
     @ns_spaced_reps.marshal_list_with(spaced_rep_output)
     def get(self, user_id):
@@ -646,7 +884,7 @@ class SpacedRepList(Resource):
 
 @ns_spaced_reps.route('/user/<int:user_id>/record-review')
 @ns_spaced_reps.param('user_id', 'The user identifier')
-class RecordNoteReview(Resource):
+class RecordNoteReview(RestxResource):
     @ns_spaced_reps.doc('record_note_review')
     @ns_spaced_reps.expect(spaced_rep_input)
     @ns_spaced_reps.marshal_with(spaced_rep_output)
@@ -690,7 +928,7 @@ class RecordNoteReview(Resource):
 @ns_spaced_reps.route('/user/<int:user_id>/note/<int:note_id>')
 @ns_spaced_reps.param('user_id', 'The user identifier')
 @ns_spaced_reps.param('note_id', 'The note identifier')
-class SpacedRepByNote(Resource):
+class SpacedRepByNote(RestxResource):
     @ns_spaced_reps.doc('remove_note_from_spaced_repetition')
     def delete(self, user_id, note_id):
         """Remove a note from spaced repetition (unmark for spaced repetition)."""
@@ -707,7 +945,7 @@ class SpacedRepByNote(Resource):
 @ns_spaced_reps.route('/user/<int:user_id>/heatmap')
 @ns_spaced_reps.param('user_id', 'The user identifier')
 @ns_spaced_reps.param('year', 'Year for heatmap (default: current year)', _in='query')
-class SpacedRepHeatmap(Resource):
+class SpacedRepHeatmap(RestxResource):
     @ns_spaced_reps.doc('get_heatmap_counts')
     def get(self, user_id):
         """Get daily repetition counts for heatmap (reviews per calendar day, optionally for a year)."""
@@ -734,7 +972,7 @@ class SpacedRepHeatmap(Resource):
 
 @ns_spaced_reps.route('/<int:rep_id>/review')
 @ns_spaced_reps.param('rep_id', 'The spaced repetition identifier')
-class ReviewSpacedRep(Resource):
+class ReviewSpacedRep(RestxResource):
     @ns_spaced_reps.doc('mark_reviewed')
     @ns_spaced_reps.marshal_with(spaced_rep_output)
     def post(self, rep_id):
@@ -764,7 +1002,7 @@ class ReviewSpacedRep(Resource):
 
 @ns_assignments.route('/user/<int:user_id>')
 @ns_assignments.param('user_id', 'The user identifier')
-class AssignmentList(Resource):
+class AssignmentList(RestxResource):
 
     @ns_assignments.doc('get_assignments')
     @ns_assignments.marshal_list_with(assignment_output)
@@ -821,7 +1059,7 @@ class AssignmentList(Resource):
 
 @ns_assignments.route('/<int:assignment_id>')
 @ns_assignments.param('assignment_id', 'The assignment identifier')
-class AssignmentResource(Resource):
+class AssignmentResource(RestxResource):
     @ns_assignments.doc('update_assignment')
     @ns_assignments.expect(assignment_input)
     @ns_assignments.marshal_with(assignment_output)
@@ -860,7 +1098,7 @@ class AssignmentResource(Resource):
 
 @ns_assignments.route('/user/<int:user_id>/weighted-grade')
 @ns_assignments.param('user_id', 'The user identifier')
-class WeightedGrade(Resource):
+class WeightedGrade(RestxResource):
 
     @ns_assignments.doc('get_weighted_grade')
     def get(self, user_id):
@@ -900,7 +1138,7 @@ class WeightedGrade(Resource):
 
 @ns_tags.route('/user/<int:user_id>')
 @ns_tags.param('user_id', 'The user identifier')
-class TagList(Resource):
+class TagList(RestxResource):
     @ns_tags.doc('get_tags')
     @ns_tags.marshal_list_with(tag_output)
     def get(self, user_id):
@@ -947,7 +1185,7 @@ class TagList(Resource):
 
 @ns_tags.route('/<int:tag_id>')
 @ns_tags.param('tag_id', 'The tag identifier')
-class TagResource(Resource):
+class TagResource(RestxResource):
     @ns_tags.doc('get_tag')
     @ns_tags.marshal_with(tag_output)
     def get(self, tag_id):
@@ -972,7 +1210,7 @@ class TagResource(Resource):
 
 @ns_tags.route('/user/<int:user_id>/names')
 @ns_tags.param('user_id', 'The user identifier')
-class TagNameList(Resource):
+class TagNameList(RestxResource):
     @ns_tags.doc('get_tag_names')
     def get(self, user_id):
         """Get just the tag names for a user (useful for autocomplete)"""
@@ -987,7 +1225,7 @@ class TagNameList(Resource):
 
 @ns_tags.route('/user/<int:user_id>/sync')
 @ns_tags.param('user_id', 'The user identifier')
-class SyncTags(Resource):
+class SyncTags(RestxResource):
     @ns_tags.doc('sync_tags')
     def post(self, user_id):
         """
@@ -1015,6 +1253,386 @@ class SyncTags(Resource):
             'new_tags_created': created_tags,
             'total_tags': len(all_tags),
             'all_tags': [tag.name for tag in all_tags]
+        }
+
+
+# =============================================================================
+# API ENDPOINTS - COURSES
+# =============================================================================
+
+@ns_courses.route('/user/<int:user_id>')
+@ns_courses.param('user_id', 'The user identifier')
+class CourseList(RestxResource):
+    @ns_courses.doc('get_courses')
+    @ns_courses.marshal_list_with(course_output)
+    def get(self, user_id):
+        """Get all courses for a user"""
+        User.query.get_or_404(user_id)
+        courses = Course.query.filter_by(user_id=user_id).order_by(Course.created_at.desc()).all()
+        return [c.to_dict() for c in courses]
+    
+    @ns_courses.doc('create_course')
+    @ns_courses.expect(course_input)
+    @ns_courses.marshal_with(course_output, code=201)
+    def post(self, user_id):
+        """Create a new course"""
+        User.query.get_or_404(user_id)
+        data = request.json
+        
+        if not data or 'name' not in data or 'code' not in data:
+            api.abort(400, 'name and code are required')
+        
+        course = Course(
+            user_id=user_id,
+            name=data['name'],
+            code=data['code'],
+            semester=data.get('semester'),
+            description=data.get('description'),
+            student_count=data.get('student_count', 0),
+            total_weeks=data.get('total_weeks', 12)
+        )
+        
+        db.session.add(course)
+        db.session.commit()
+        
+        return course.to_dict(), 201
+
+
+@ns_courses.route('/<int:course_id>')
+@ns_courses.param('course_id', 'The course identifier')
+class CourseItem(RestxResource):
+    @ns_courses.doc('get_course')
+    @ns_courses.marshal_with(course_output)
+    def get(self, course_id):
+        """Get a specific course"""
+        course = Course.query.get_or_404(course_id)
+        return course.to_dict()
+    
+    @ns_courses.doc('update_course')
+    @ns_courses.expect(course_input)
+    @ns_courses.marshal_with(course_output)
+    def put(self, course_id):
+        """Update a course"""
+        course = Course.query.get_or_404(course_id)
+        data = request.json
+        
+        if 'name' in data:
+            course.name = data['name']
+        if 'code' in data:
+            course.code = data['code']
+        if 'semester' in data:
+            course.semester = data['semester']
+        if 'description' in data:
+            course.description = data['description']
+        if 'student_count' in data:
+            course.student_count = data['student_count']
+        if 'total_weeks' in data:
+            course.total_weeks = data['total_weeks']
+        
+        course.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return course.to_dict()
+    
+    @ns_courses.doc('delete_course')
+    @ns_courses.response(200, 'Course deleted')
+    def delete(self, course_id):
+        """Delete a course and all its resources"""
+        course = Course.query.get_or_404(course_id)
+        
+        # Delete all resource files associated with this course
+        for resource in course.resources:
+            if os.path.exists(resource.file_path):
+                try:
+                    os.remove(resource.file_path)
+                except OSError as e:
+                    print(f"Error deleting file {resource.file_path}: {e}")
+        
+        db.session.delete(course)
+        db.session.commit()
+        
+        return {'message': 'Course deleted successfully'}, 200
+
+
+@ns_courses.route('/<int:course_id>/resources')
+@ns_courses.param('course_id', 'The course identifier')
+class CourseResources(RestxResource):
+    @ns_courses.doc('get_course_resources')
+    @ns_courses.marshal_list_with(resource_output)
+    @ns_courses.param('week_number', 'Filter by week number')
+    def get(self, course_id):
+        """Get all resources for a course"""
+        course = Course.query.get_or_404(course_id)
+        
+        query = Resource.query.filter_by(course_id=course_id)
+        
+        week_number = request.args.get('week_number', type=int)
+        if week_number:
+            query = query.filter_by(week_number=week_number)
+        
+        resources = query.order_by(Resource.week_number, Resource.created_at.desc()).all()
+        return [r.to_dict() for r in resources]
+
+
+# =============================================================================
+# API ENDPOINTS - RESOURCES
+# =============================================================================
+
+@ns_resources.route('/user/<int:user_id>/upload')
+@ns_resources.param('user_id', 'The user identifier')
+class ResourceUpload(RestxResource):
+    @ns_resources.doc('upload_resource')
+    @ns_resources.marshal_with(resource_output, code=201)
+    def post(self, user_id):
+        """Upload a new resource file (lecture material)"""
+        User.query.get_or_404(user_id)
+        
+        if 'file' not in request.files:
+            api.abort(400, 'No file provided')
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            api.abort(400, 'No file selected')
+        
+        if not allowed_file(file.filename):
+            api.abort(400, f'File type not allowed. Allowed types: {", ".join(ALLOWED_EXTENSIONS.keys())}')
+        
+        # Get metadata from form data
+        title = request.form.get('title', file.filename)
+        description = request.form.get('description', '')
+        course_id = request.form.get('course_id')
+        week_number = request.form.get('week_number')
+        
+        # Parse course_id as integer
+        if course_id:
+            try:
+                course_id = int(course_id)
+                # Verify course exists
+                Course.query.get_or_404(course_id)
+            except ValueError:
+                course_id = None
+        
+        if week_number:
+            try:
+                week_number = int(week_number)
+            except ValueError:
+                week_number = None
+        
+        # Generate unique filename
+        original_filename = secure_filename(file.filename)
+        file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+        unique_filename = f"{uuid.uuid4().hex}.{file_extension}" if file_extension else uuid.uuid4().hex
+        
+        # Create user directory if it doesn't exist
+        user_folder = os.path.join(app.config['RESOURCES_FOLDER'], str(user_id))
+        os.makedirs(user_folder, exist_ok=True)
+        
+        # Save the file
+        file_path = os.path.join(user_folder, unique_filename)
+        file.save(file_path)
+        
+        # Get file size and mime type
+        file_size = os.path.getsize(file_path)
+        mime_type = mimetypes.guess_type(original_filename)[0] or 'application/octet-stream'
+        file_type = get_file_type(original_filename)
+        
+        # Create resource record
+        resource = Resource(
+            user_id=user_id,
+            filename=unique_filename,
+            original_filename=original_filename,
+            file_path=file_path,
+            file_size=file_size,
+            mime_type=mime_type,
+            file_type=file_type,
+            course_id=course_id,
+            week_number=week_number,
+            title=title,
+            description=description
+        )
+        
+        db.session.add(resource)
+        db.session.commit()
+        
+        return resource.to_dict(), 201
+
+
+@ns_resources.route('/user/<int:user_id>')
+@ns_resources.param('user_id', 'The user identifier')
+class ResourceList(RestxResource):
+    @ns_resources.doc('get_resources')
+    @ns_resources.marshal_list_with(resource_output)
+    @ns_resources.param('course_id', 'Filter by course ID')
+    @ns_resources.param('week_number', 'Filter by week number')
+    @ns_resources.param('file_type', 'Filter by file type (pdf, video, audio, document, image, archive, other)')
+    def get(self, user_id):
+        """Get all resources for a user"""
+        User.query.get_or_404(user_id)
+        
+        query = Resource.query.filter_by(user_id=user_id)
+        
+        course_id = request.args.get('course_id')
+        week_number = request.args.get('week_number', type=int)
+        file_type = request.args.get('file_type')
+        
+        if course_id:
+            query = query.filter_by(course_id=course_id)
+        if week_number:
+            query = query.filter_by(week_number=week_number)
+        if file_type:
+            query = query.filter_by(file_type=file_type)
+        
+        resources = query.order_by(Resource.created_at.desc()).all()
+        return [r.to_dict() for r in resources]
+
+
+@ns_resources.route('/<int:resource_id>')
+@ns_resources.param('resource_id', 'The resource identifier')
+class ResourceItem(RestxResource):
+    @ns_resources.doc('get_resource')
+    @ns_resources.marshal_with(resource_output)
+    def get(self, resource_id):
+        """Get a specific resource metadata"""
+        resource = Resource.query.get_or_404(resource_id)
+        return resource.to_dict()
+    
+    @ns_resources.doc('update_resource')
+    @ns_resources.expect(resource_update_input)
+    @ns_resources.marshal_with(resource_output)
+    def put(self, resource_id):
+        """Update resource metadata"""
+        resource = Resource.query.get_or_404(resource_id)
+        data = request.json
+        
+        if 'title' in data:
+            resource.title = data['title']
+        if 'description' in data:
+            resource.description = data['description']
+        if 'course_id' in data:
+            resource.course_id = data['course_id']
+        if 'course_name' in data:
+            resource.course_name = data['course_name']
+        if 'week_number' in data:
+            resource.week_number = data['week_number']
+        
+        resource.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return resource.to_dict()
+    
+    @ns_resources.doc('delete_resource')
+    @ns_resources.response(200, 'Resource deleted')
+    def delete(self, resource_id):
+        """Delete a resource and its file"""
+        resource = Resource.query.get_or_404(resource_id)
+        
+        # Delete the file from disk
+        if os.path.exists(resource.file_path):
+            try:
+                os.remove(resource.file_path)
+            except OSError as e:
+                # Log error but continue with database deletion
+                print(f"Error deleting file {resource.file_path}: {e}")
+        
+        db.session.delete(resource)
+        db.session.commit()
+        
+        return {'message': 'Resource deleted successfully'}, 200
+
+
+@ns_resources.route('/<int:resource_id>/file')
+@ns_resources.param('resource_id', 'The resource identifier')
+class ResourceFile(RestxResource):
+    @ns_resources.doc('get_resource_file')
+    def get(self, resource_id):
+        """Download/view the resource file"""
+        resource = Resource.query.get_or_404(resource_id)
+        
+        if not os.path.exists(resource.file_path):
+            api.abort(404, 'File not found on disk')
+        
+        # Determine if we should send as attachment or inline
+        download = request.args.get('download', 'false').lower() == 'true'
+        
+        return send_file(
+            resource.file_path,
+            mimetype=resource.mime_type,
+            as_attachment=download,
+            download_name=resource.original_filename
+        )
+
+
+@ns_resources.route('/user/<int:user_id>/courses')
+@ns_resources.param('user_id', 'The user identifier')
+class ResourceCourses(RestxResource):
+    @ns_resources.doc('get_resource_courses')
+    def get(self, user_id):
+        """Get all unique courses that have resources"""
+        User.query.get_or_404(user_id)
+        
+        resources = Resource.query.filter_by(user_id=user_id).filter(
+            Resource.course_id.isnot(None)
+        ).all()
+        
+        courses = {}
+        for r in resources:
+            if r.course_id and r.course_id not in courses:
+                courses[r.course_id] = {
+                    'course_id': r.course_id,
+                    'course_name': r.course_name or r.course_id,
+                    'resource_count': 0,
+                    'weeks': set()
+                }
+            if r.course_id:
+                courses[r.course_id]['resource_count'] += 1
+                if r.week_number:
+                    courses[r.course_id]['weeks'].add(r.week_number)
+        
+        # Convert sets to lists for JSON serialization
+        result = []
+        for course in courses.values():
+            course['weeks'] = sorted(list(course['weeks']))
+            result.append(course)
+        
+        return {'courses': result}
+
+
+@ns_resources.route('/user/<int:user_id>/batch-delete')
+@ns_resources.param('user_id', 'The user identifier')
+class ResourceBatchDelete(RestxResource):
+    @ns_resources.doc('batch_delete_resources')
+    def post(self, user_id):
+        """Delete multiple resources at once"""
+        User.query.get_or_404(user_id)
+        data = request.json
+        
+        if not data or 'resource_ids' not in data:
+            api.abort(400, 'resource_ids is required')
+        
+        resource_ids = data['resource_ids']
+        deleted_count = 0
+        errors = []
+        
+        for resource_id in resource_ids:
+            resource = Resource.query.filter_by(id=resource_id, user_id=user_id).first()
+            if resource:
+                # Delete file
+                if os.path.exists(resource.file_path):
+                    try:
+                        os.remove(resource.file_path)
+                    except OSError as e:
+                        errors.append(f"Error deleting file for resource {resource_id}: {e}")
+                
+                db.session.delete(resource)
+                deleted_count += 1
+        
+        db.session.commit()
+        
+        return {
+            'message': f'Deleted {deleted_count} resources',
+            'deleted_count': deleted_count,
+            'errors': errors if errors else None
         }
 
 
@@ -1149,13 +1767,175 @@ def generate_monthly_plan_logic(start_date, notes, assignments):
     
     return monthly_plan
 
+# =============================================================================
+# API ENDPOINTS - AI CHAT (CORRECTED VERSION)
+# =============================================================================
+# Replace the chat endpoints section in app.py with this corrected version
+
+@ns_chat.route('/user/<int:user_id>/message')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatMessage(RestxResource):
+    @ns_chat.doc('send_chat_message')
+    @ns_chat.expect(chat_message_input)
+    @ns_chat.marshal_with(chat_response_output)
+    def post(self, user_id):
+        """Send a message to the AI assistant"""
+        # Import here to avoid circular imports
+        try:
+            from ai_chat import chat_with_ai
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured. Ensure ai_chat.py is in the project directory.')
+        
+        # Verify user exists
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        data = request.json
+        
+        if not data or 'message' not in data:
+            api.abort(400, 'message is required')
+        
+        user_message = data['message']
+        conversation_history = data.get('conversation_history', [])
+        
+        try:
+            result = chat_with_ai(user_id, user_message, conversation_history)
+            
+            return {
+                'response': result['response'],
+                'conversation_history': result['conversation_history'],
+                'tokens_used': result['tokens_used'],
+                'timestamp': datetime.utcnow().isoformat()
+            }
+        
+        except Exception as e:
+            api.abort(500, f'Error communicating with AI: {str(e)}')
+
+
+@ns_chat.route('/user/<int:user_id>/session/end')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatSessionEnd(RestxResource):
+    @ns_chat.doc('end_chat_session')
+    @ns_chat.expect(chat_session_end_input)
+    def post(self, user_id):
+        """End a chat session and save conversation summary to context"""
+        try:
+            from ai_chat import end_conversation_session
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        data = request.json
+        
+        if not data or 'conversation_history' not in data:
+            api.abort(400, 'conversation_history is required')
+        
+        conversation_history = data['conversation_history']
+        
+        try:
+            context_entry = end_conversation_session(user_id, conversation_history)
+            
+            if context_entry:
+                return {
+                    'message': 'Session ended and context saved',
+                    'context_entry': context_entry
+                }, 200
+            else:
+                return {
+                    'message': 'Session ended (no conversation to save)'
+                }, 200
+        
+        except Exception as e:
+            api.abort(500, f'Error ending session: {str(e)}')
+
+
+@ns_chat.route('/user/<int:user_id>/context')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatContext(RestxResource):
+    @ns_chat.doc('get_chat_context')
+    @ns_chat.marshal_with(context_output)
+    def get(self, user_id):
+        """Get the full context history for a user"""
+        try:
+            from ai_chat import load_context
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        try:
+            context = load_context(user_id)
+            return context
+        
+        except Exception as e:
+            api.abort(500, f'Error loading context: {str(e)}')
+    
+    @ns_chat.doc('clear_chat_context')
+    def delete(self, user_id):
+        """Clear all context history for a user"""
+        try:
+            from ai_chat import clear_context
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        try:
+            context = clear_context(user_id)
+            return {
+                'message': 'Context cleared successfully',
+                'context': context
+            }, 200
+        
+        except Exception as e:
+            api.abort(500, f'Error clearing context: {str(e)}')
+
+
+@ns_chat.route('/user/<int:user_id>/context/stats')
+@ns_chat.param('user_id', 'The user identifier')
+@ns_chat.response(404, 'User not found')
+@ns_chat.response(500, 'Server error')
+class ChatContextStats(RestxResource):
+    @ns_chat.doc('get_context_stats')
+    @ns_chat.marshal_with(context_stats_output)
+    def get(self, user_id):
+        """Get statistics about the user's context history"""
+        try:
+            from ai_chat import get_context_stats
+        except ImportError:
+            api.abort(500, 'AI chat module not properly configured')
+        
+        user = User.query.get(user_id)
+        if not user:
+            api.abort(404, f'User {user_id} not found')
+        
+        try:
+            stats = get_context_stats(user_id)
+            return stats
+        
+        except Exception as e:
+            api.abort(500, f'Error getting context stats: {str(e)}')
 
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
 
 @api.route('/api/health')
-class HealthCheck(Resource):
+class HealthCheck(RestxResource):
     def get(self):
         """Health check endpoint"""
         return {'status': 'healthy', 'timestamp': datetime.utcnow().isoformat()}, 200

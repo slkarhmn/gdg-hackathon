@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
   ChevronRight,
   ChevronDown,
+  ChevronLeft,
   FileText,
   Folder,
   FolderPlus,
@@ -14,7 +15,11 @@ import {
   PanelLeftClose,
   PanelLeft,
   Tag,
-  Repeat
+  Repeat,
+  Timer,
+  Play,
+  Pause,
+  RotateCcw
 } from 'lucide-react';
 import './Notes.css';
 import { fetchNotes, createNote, updateNote, fetchTagNames, fetchSpacedRepetitions, recordNoteReview, removeNoteFromSpacedRepetition } from '../api';
@@ -46,6 +51,15 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface NotesProps {
   onNavigate: (page: Page) => void;
+  initialPreloadedNote?: BackendNote | null;
+  onClearPreloadedNote?: () => void;
+  // Persisted tab state from App
+  persistedOpenTabs?: OpenTab[];
+  persistedActiveTabId?: string;
+  onTabsChange?: (tabs: OpenTab[]) => void;
+  onActiveTabChange?: (tabId: string) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -117,12 +131,25 @@ function groupNotesIntoFolders(notes: BackendNote[]): LectureFolder[] {
   return folders;
 }
 
-const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
+const Notes: React.FC<NotesProps> = ({ 
+  onNavigate, 
+  initialPreloadedNote, 
+  onClearPreloadedNote,
+  persistedOpenTabs,
+  persistedActiveTabId,
+  onTabsChange,
+  onActiveTabChange,
+  viewMode = 'student', 
+  onViewModeToggle 
+}) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('notes');
   const [folders, setFolders] = useState<LectureFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setAllNotesData] = useState<BackendNote[]>([]);
+  const initialPreloadedNoteIdRef = useRef<string | null>(null);
+  const handledPreloadedNoteIdRef = useRef<number | null>(null);
+  initialPreloadedNoteIdRef.current = initialPreloadedNote?.id != null ? String(initialPreloadedNote.id) : null;
 
   // Fetch notes from API
   useEffect(() => {
@@ -138,6 +165,8 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
         const groupedFolders = groupNotesIntoFolders(notesData);
 
         // If no notes from API, use placeholder folders
+        
+        // If no notes from API, use placeholder folders (but don't auto-open any note)
         if (groupedFolders.length === 0) {
           const placeholderFolders: LectureFolder[] = [
             {
@@ -168,6 +197,14 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
             setOpenTabs([{ id: firstNote.id, title: firstNote.title, folderId: groupedFolders[0].id }]);
             setActiveTabId(firstNote.id);
           }
+          
+          // Don't auto-open any note - start with empty state
+          // Only open a note when a preloaded note is passed (e.g. from Grades or Dashboard)
+        } else {
+          setFolders(groupedFolders);
+          
+          // Don't auto-open the first note - only open when explicitly clicked
+          // or when a preloaded note is passed from another page
         }
       } catch (err) {
         console.error('Failed to load notes:', err);
@@ -182,8 +219,18 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
     loadNotes();
   }, []);
 
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string>('');
+  // Initialize tabs from persisted state (preserved across navigation)
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>(persistedOpenTabs ?? []);
+  const [activeTabId, setActiveTabId] = useState<string>(persistedActiveTabId ?? '');
+
+  // Sync tab changes back to parent (App.tsx) for persistence
+  useEffect(() => {
+    onTabsChange?.(openTabs);
+  }, [openTabs, onTabsChange]);
+
+  useEffect(() => {
+    onActiveTabChange?.(activeTabId);
+  }, [activeTabId, onActiveTabChange]);
   const [searchQuery, setSearchQuery] = useState('');
   const [notesSidebarCollapsed, setNotesSidebarCollapsed] = useState(false);
   const [showAIChat, setShowAIChat] = useState(false);
@@ -210,6 +257,20 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
 
 
   const editorRef = useRef<HTMLDivElement>(null);
+
+  // Pomodoro timer state
+  const [pomodoroCollapsed, setPomodoroCollapsed] = useState(false);
+  const [workMinutes, setWorkMinutes] = useState(25);
+  const [shortBreakMinutes, setShortBreakMinutes] = useState(5);
+  const [longBreakMinutes, setLongBreakMinutes] = useState(15);
+  const [pomodorosBeforeLongBreak, setPomodorosBeforeLongBreak] = useState(4);
+  type PomodoroPhase = 'work' | 'shortBreak' | 'longBreak';
+  const [pomodoroPhase, setPomodoroPhase] = useState<PomodoroPhase>('work');
+  const [pomodoroSecondsRemaining, setPomodoroSecondsRemaining] = useState(25 * 60);
+  const [pomodoroRunning, setPomodoroRunning] = useState(false);
+  const [pomodoroCount, setPomodoroCount] = useState(0); // completed work sessions
+  const pomodoroIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pomodoroInitialSecondsRef = useRef(25 * 60);
 
   const loadSpacedRepetitions = () => {
     fetchSpacedRepetitions(DEFAULT_USER_ID)
@@ -296,6 +357,164 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
       setActiveTabId(newTabs[newTabs.length - 1].id);
     }
   };
+
+  // Open the preloaded note when navigating from Grades (API-fetched note)
+  useEffect(() => {
+    if (!initialPreloadedNote || loading) return;
+    if (handledPreloadedNoteIdRef.current === initialPreloadedNote.id) return;
+    handledPreloadedNoteIdRef.current = initialPreloadedNote.id;
+
+    const noteIdStr = initialPreloadedNote.id.toString();
+    const noteForEditor: Note = {
+      id: noteIdStr,
+      title: extractNoteTitle(initialPreloadedNote),
+      content: extractNoteContent(initialPreloadedNote),
+      tags: initialPreloadedNote.tags || [],
+    };
+    const subject = initialPreloadedNote.subject || 'Uncategorized';
+
+    if (folders.length === 0) {
+      // No folders yet: create a single folder with just this note and open it
+      const folderId = '1';
+      setFolders([
+        {
+          id: folderId,
+          name: subject,
+          notes: [noteForEditor],
+          isExpanded: true,
+        },
+      ]);
+      // Preserve existing tabs and add the new note as a tab
+      setOpenTabs((prev) => {
+        const existing = prev.find((tab) => tab.id === noteIdStr);
+        if (existing) return prev.map((t) => (t.id === noteIdStr ? { ...t, title: noteForEditor.title } : t));
+        return [...prev, { id: noteIdStr, title: noteForEditor.title, folderId }];
+      });
+      setActiveTabId(noteIdStr);
+      onClearPreloadedNote?.();
+      return;
+    }
+
+    // Merge preloaded note into folders (replace by id or add to subject folder)
+    let folderId: string | null = null;
+    const nextFolders = folders.map((folder) => {
+      const existingIndex = folder.notes.findIndex((n) => n.id === noteIdStr);
+      if (existingIndex >= 0) {
+        folderId = folder.id;
+        const notes = [...folder.notes];
+        notes[existingIndex] = noteForEditor;
+        return { ...folder, notes };
+      }
+      if (folder.name === subject) {
+        folderId = folder.id;
+        const hasNote = folder.notes.some((n) => n.id === noteIdStr);
+        const notes = hasNote
+          ? folder.notes.map((n) => (n.id === noteIdStr ? noteForEditor : n))
+          : [...folder.notes, noteForEditor];
+        return { ...folder, notes };
+      }
+      return folder;
+    });
+
+    if (folderId == null) {
+      // No matching folder: add a new folder for this subject
+      folderId = String(folders.length + 1);
+      nextFolders.push({
+        id: folderId,
+        name: subject,
+        notes: [noteForEditor],
+        isExpanded: true,
+      });
+    }
+
+    const openFolderId: string = folderId;
+
+    setFolders(nextFolders);
+    setOpenTabs((prev) => {
+      const existing = prev.find((tab) => tab.id === noteIdStr);
+      if (existing) return prev.map((t) => (t.id === noteIdStr ? { ...t, title: noteForEditor.title } : t));
+      return [...prev, { id: noteIdStr, title: noteForEditor.title, folderId: openFolderId }];
+    });
+    setActiveTabId(noteIdStr);
+    onClearPreloadedNote?.();
+  }, [initialPreloadedNote, loading, folders, onClearPreloadedNote]);
+
+  // Pomodoro: get initial seconds for current phase
+  const getPomodoroPhaseMinutes = useCallback(() => {
+    if (pomodoroPhase === 'work') return workMinutes;
+    if (pomodoroPhase === 'shortBreak') return shortBreakMinutes;
+    return longBreakMinutes;
+  }, [pomodoroPhase, workMinutes, shortBreakMinutes, longBreakMinutes]);
+
+  const advancePomodoroPhase = useCallback(() => {
+    setPomodoroRunning(false);
+    if (pomodoroPhase === 'work') {
+      const nextCount = pomodoroCount + 1;
+      setPomodoroCount(nextCount);
+      if (nextCount >= pomodorosBeforeLongBreak) {
+        setPomodoroPhase('longBreak');
+        setPomodoroSecondsRemaining(longBreakMinutes * 60);
+        pomodoroInitialSecondsRef.current = longBreakMinutes * 60;
+      } else {
+        setPomodoroPhase('shortBreak');
+        setPomodoroSecondsRemaining(shortBreakMinutes * 60);
+        pomodoroInitialSecondsRef.current = shortBreakMinutes * 60;
+      }
+    } else {
+      if (pomodoroPhase === 'longBreak') setPomodoroCount(0);
+      setPomodoroPhase('work');
+      setPomodoroSecondsRemaining(workMinutes * 60);
+      pomodoroInitialSecondsRef.current = workMinutes * 60;
+    }
+  }, [pomodoroPhase, pomodoroCount, pomodorosBeforeLongBreak, workMinutes, shortBreakMinutes, longBreakMinutes]);
+
+  useEffect(() => {
+    if (!pomodoroRunning) return;
+    pomodoroIntervalRef.current = setInterval(() => {
+      setPomodoroSecondsRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => {
+      if (pomodoroIntervalRef.current) {
+        clearInterval(pomodoroIntervalRef.current);
+        pomodoroIntervalRef.current = null;
+      }
+    };
+  }, [pomodoroRunning]);
+
+  // When timer hits 0, advance to next phase
+  useEffect(() => {
+    if (!pomodoroRunning || pomodoroSecondsRemaining > 0) return;
+    advancePomodoroPhase();
+  }, [pomodoroRunning, pomodoroSecondsRemaining, advancePomodoroPhase]);
+
+  const startPomodoro = () => {
+    setPomodoroRunning(true);
+  };
+
+  const pausePomodoro = () => {
+    setPomodoroRunning(false);
+  };
+
+  const resetPomodoro = () => {
+    setPomodoroRunning(false);
+    const mins = getPomodoroPhaseMinutes();
+    setPomodoroSecondsRemaining(mins * 60);
+    pomodoroInitialSecondsRef.current = mins * 60;
+  };
+
+  const formatPomodoroTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // When duration settings change and timer is not running, update remaining time for current phase
+  useEffect(() => {
+    if (pomodoroRunning) return;
+    const mins = getPomodoroPhaseMinutes();
+    setPomodoroSecondsRemaining(mins * 60);
+    pomodoroInitialSecondsRef.current = mins * 60;
+  }, [workMinutes, shortBreakMinutes, longBreakMinutes, pomodoroPhase, pomodoroRunning, getPomodoroPhaseMinutes]);
 
   const handleTextSelection = () => {
     const selection = window.getSelection();
@@ -632,7 +851,7 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
   if (loading) {
     return (
       <div className="notes-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="notes-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100%' }}>
             <p>Loading notes...</p>
@@ -1062,6 +1281,114 @@ const Notes: React.FC<NotesProps> = ({ onNavigate }) => {
             </div>
           )}
         </main>
+
+        {/* Collapsible Pomodoro Timer - right side */}
+        <aside className={`pomodoro-panel ${pomodoroCollapsed ? 'collapsed' : ''}`}>
+          {!pomodoroCollapsed && (
+            <>
+              <div className="pomodoro-header">
+                <Timer size={18} />
+                <span className="pomodoro-title">Pomodoro</span>
+                <button
+                  type="button"
+                  className="pomodoro-collapse-btn"
+                  onClick={() => setPomodoroCollapsed(true)}
+                  title="Collapse timer"
+                  aria-label="Collapse timer"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+              <div className="pomodoro-body">
+                <div className={`pomodoro-phase-badge ${pomodoroPhase}`}>
+                  {pomodoroPhase === 'work' && `Focus · ${pomodoroCount}/${pomodorosBeforeLongBreak}`}
+                  {pomodoroPhase === 'shortBreak' && 'Short break'}
+                  {pomodoroPhase === 'longBreak' && 'Long break'}
+                </div>
+                <div className="pomodoro-time">{formatPomodoroTime(pomodoroSecondsRemaining)}</div>
+                <div className="pomodoro-controls">
+                  <button
+                    type="button"
+                    className="pomodoro-btn primary"
+                    onClick={pomodoroRunning ? pausePomodoro : startPomodoro}
+                    title={pomodoroRunning ? 'Pause' : 'Start'}
+                  >
+                    {pomodoroRunning ? <Pause size={20} /> : <Play size={20} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="pomodoro-btn"
+                    onClick={resetPomodoro}
+                    title="Reset"
+                  >
+                    <RotateCcw size={18} />
+                  </button>
+                </div>
+                <div className="pomodoro-settings">
+                  <label className="pomodoro-setting">
+                    <span>Work (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={workMinutes}
+                      onChange={(e) => setWorkMinutes(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 25)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Short break (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={shortBreakMinutes}
+                      onChange={(e) => setShortBreakMinutes(Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 5)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Long break (min)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={45}
+                      value={longBreakMinutes}
+                      onChange={(e) => setLongBreakMinutes(Math.max(1, Math.min(45, parseInt(e.target.value, 10) || 15)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                  <label className="pomodoro-setting">
+                    <span>Pomodoros until long</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={8}
+                      value={pomodorosBeforeLongBreak}
+                      onChange={(e) => setPomodorosBeforeLongBreak(Math.max(2, Math.min(8, parseInt(e.target.value, 10) || 4)))}
+                      disabled={pomodoroRunning}
+                    />
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
+
+        {pomodoroCollapsed && (
+          <div className="pomodoro-expand-container">
+            <button
+              type="button"
+              className="pomodoro-expand-btn"
+              onClick={() => setPomodoroCollapsed(false)}
+              title="Open Pomodoro timer"
+              aria-label="Open Pomodoro timer"
+            >
+              <ChevronLeft size={20} />
+              <Timer size={18} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

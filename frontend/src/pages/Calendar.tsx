@@ -29,6 +29,8 @@ type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades
 
 interface CalendarProps {
   onNavigate: (page: Page) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 function assignmentPriority(dueDate: string): 'high' | 'medium' | 'low' {
@@ -106,7 +108,7 @@ function studyPlanToCalendarEvents(plan: StudyPlanResponse | null): CalendarEven
   return events;
 }
 
-const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
+const Calendar: React.FC<CalendarProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle }) => {
   const [activeTab, setActiveTab] = useState('calendar');
   const today = new Date();
   const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
@@ -256,7 +258,12 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
 
   return (
     <div className="calendar-container">
-      <Sidebar activeTab={activeTab} setActiveTab={handleTabChange} />
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={handleTabChange}
+        viewMode={viewMode}
+        onViewModeToggle={onViewModeToggle}
+      />
       
       <main className="calendar-main">
         <Header userName="Saachi" />

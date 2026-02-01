@@ -3,7 +3,6 @@ import Sidebar from '../components/layout/Sidebar';
 import {
   Plus,
   Calendar,
-  Clock,
   Tag,
   FileText,
   MessageSquare,
@@ -13,7 +12,6 @@ import {
   CheckCircle2,
   Circle,
   ChevronRight,
-  Filter,
   Search,
   BookOpen,
   Target,
@@ -25,6 +23,7 @@ import {
   fetchAssignments,
   fetchWeightedGrade,
   fetchNotes,
+  fetchNoteById,
   createAssignment
 } from '../api';
 import { DEFAULT_USER_ID } from '../api/config';
@@ -68,7 +67,9 @@ interface CourseGrade {
 type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades' | 'todo' | 'help';
 
 interface GradesProps {
-  onNavigate: (page: Page) => void;
+  onNavigate: (page: Page, options?: { openNoteId?: string; preloadedNote?: BackendNote }) => void;
+  viewMode?: 'student' | 'professor';
+  onViewModeToggle?: () => void;
 }
 
 // Helper to extract title from note content
@@ -125,7 +126,7 @@ function transformAssignment(a: BackendAssignment): Assignment {
   };
 }
 
-const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
+const Grades: React.FC<GradesProps> = ({ onNavigate, viewMode = 'student', onViewModeToggle  }) => {
   const [mainSidebarTab, setMainSidebarTab] = useState('analytics');
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [showAddAssignment, setShowAddAssignment] = useState(false);
@@ -143,6 +144,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   const [allNotes, setAllNotes] = useState<BackendNote[]>([]);
   const [weightedGradeData, setWeightedGradeData] = useState<WeightedGradeResponse | null>(null);
   const [targetGrade, setTargetGrade] = useState(90);
+  const [openingNoteId, setOpeningNoteId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -322,7 +324,7 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
   if (loading) {
     return (
       <div className="grades-page-container">
-        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} />
+        <Sidebar activeTab={mainSidebarTab} setActiveTab={handleTabChange} viewMode={viewMode} onViewModeToggle={onViewModeToggle}/>
         <div className="grades-content-wrapper">
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
             <p>Loading grades...</p>
@@ -684,12 +686,42 @@ const Grades: React.FC<GradesProps> = ({ onNavigate }) => {
                   <div className="related-notes-list">
                     {relatedNotesForSelected.length > 0 ? (
                       relatedNotesForSelected.map(note => (
-                        <div key={note.id} className="related-note-card">
+                        <div
+                          key={note.id}
+                          className={`related-note-card ${openingNoteId === note.id ? 'opening' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={async () => {
+                            if (openingNoteId) return;
+                            setOpeningNoteId(note.id);
+                            try {
+                              const fetchedNote = await fetchNoteById(parseInt(note.id, 10));
+                              onNavigate('notes', { preloadedNote: fetchedNote });
+                            } catch (err) {
+                              console.error('Failed to load note:', err);
+                              setOpeningNoteId(null);
+                            }
+                          }}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              if (openingNoteId) return;
+                              setOpeningNoteId(note.id);
+                              try {
+                                const fetchedNote = await fetchNoteById(parseInt(note.id, 10));
+                                onNavigate('notes', { preloadedNote: fetchedNote });
+                              } catch (err) {
+                                console.error('Failed to load note:', err);
+                                setOpeningNoteId(null);
+                              }
+                            }
+                          }}
+                        >
                           <div className="note-card-header">
                             <FileText size={16} />
-                            <h4>{note.title}</h4>
+                            <h4>{openingNoteId === note.id ? 'Opening...' : note.title}</h4>
                           </div>
-                          <p className="note-preview">{note.preview}</p>
+                          <p className="note-preview">{openingNoteId === note.id ? '' : note.preview}</p>
                           <div className="note-tags">
                             {note.tags.map((tag, idx) => (
                               <span key={idx} className="note-tag">{tag}</span>

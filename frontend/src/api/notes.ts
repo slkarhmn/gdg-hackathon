@@ -291,6 +291,19 @@ export async function fetchNotes(userId: number = DEFAULT_USER_ID): Promise<Back
 }
 
 /**
+ * Fetch a single note by ID
+ */
+export async function fetchNoteById(noteId: number): Promise<BackendNote> {
+  const response = await fetch(ENDPOINTS.noteById(noteId));
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch note: ${response.statusText}`);
+  }
+  
+  return response.json();
+}
+
+/**
  * Create a new note for a user
  */
 export async function createNote(
