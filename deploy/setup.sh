@@ -2,8 +2,10 @@
 # deploy/setup.sh
 # Runs ON the Azure VM after files are copied.
 # Idempotent — safe to run multiple times.
-
 set -e
+
+# Suppress interactive prompts
+export DEBIAN_FRONTEND=noninteractive
 
 APP_DIR="/opt/myapp"
 DEPLOY_DIR="/tmp/deploy"
@@ -15,18 +17,14 @@ echo "  Deploying Flask + React App"
 echo "=========================================="
 
 # ─── 1. Install system dependencies (first run only) ──────
-if ! command -v python3 &> /dev/null; then
-  echo "[1/7] Installing Python..."
+echo "[1/7] Installing system dependencies..."
+if ! command -v python3 &> /dev/null || ! dpkg -l | grep -q python3-venv; then
   sudo apt-get update -qq
-  sudo apt-get install -y -qq python3 python3-pip python3-venv nginx
-else
-  echo "[1/7] Python already installed. Skipping."
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-pip python3-venv
 fi
 
 if ! command -v nginx &> /dev/null; then
-  echo "      Installing Nginx..."
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq nginx
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx
 fi
 
 # ─── 2. Create app directory ───────────────────────────────
