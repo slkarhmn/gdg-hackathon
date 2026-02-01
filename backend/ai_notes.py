@@ -24,14 +24,24 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 def extract_text_from_note(note):
     """
     Extracts lecture note text from stored content (expects Note SQLAlchemy object).
+    Supports content with 'text', 'body', or 'title' keys (frontend uses {title, body}).
     """
     try:
         logger.info(f"Extracting text from note ID={note.id}")
-        content_dict = json.loads(note.content)
+        content_dict = json.loads(note.content) if isinstance(note.content, str) else (note.content or {})
         text = content_dict.get("text", "")
+        if not text:
+            body = content_dict.get("body", "")
+            title = content_dict.get("title", "")
+            if isinstance(body, str) and isinstance(title, str):
+                text = (f"# {title}\n\n" if title else "") + body
+            elif isinstance(body, str):
+                text = body
+            elif isinstance(title, str):
+                text = title
 
         logger.info(f"Extracted text length: {len(text)} characters")
-        return text
+        return text or ""
     except Exception as e:
         logger.exception("Failed to extract text from note")
         raise

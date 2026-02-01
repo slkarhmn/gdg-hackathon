@@ -158,7 +158,7 @@ def format_context_for_prompt(user_id):
     return context_text
 
 
-def chat_with_ai(user_id, user_message, conversation_history=None):
+def chat_with_ai(user_id, user_message, conversation_history=None, source=None, note_context=None):
     """
     Send a message to OpenAI and get a response, maintaining conversation context
     
@@ -166,6 +166,8 @@ def chat_with_ai(user_id, user_message, conversation_history=None):
         user_id: User ID
         user_message: The user's message
         conversation_history: Optional list of previous messages in this session
+        source: Optional context hint (e.g. "notes", "grades:assignment:X") for better responses
+        note_context: Optional current note content when chatting from Notes view
     
     Returns:
         Dict containing the AI response and updated conversation history
@@ -180,13 +182,21 @@ def chat_with_ai(user_id, user_message, conversation_history=None):
     # Get context from previous conversations
     context_prompt = format_context_for_prompt(user_id)
     
+    source_hint = ""
+    if source:
+        source_hint = f"\n\nThe user is currently in: {source}. Use this context to tailor your response.\n"
+    
+    note_hint = ""
+    if note_context and note_context.strip():
+        note_hint = f"\n\n--- Current note content (the user is viewing this note; answer questions about it) ---\n{note_context[:4000]}\n--- End of note ---\n"
+    
     # Build messages for OpenAI
     messages = [
         {
             "role": "system", 
             "content": f"""You are a helpful study assistant. You help students manage their notes, 
 assignments, and study plans. Be concise, friendly, and educational.
-
+{source_hint}{note_hint}
 {context_prompt}"""
         }
     ]

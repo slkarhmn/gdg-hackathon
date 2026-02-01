@@ -537,7 +537,9 @@ course_output = api.model('Course', {
 # Chat models
 chat_message_input = api.model('ChatMessageInput', {
     'message': fields.String(required=True, description='User message to send to AI'),
-    'conversation_history': fields.Raw(description='Optional conversation history from current session')
+    'conversation_history': fields.Raw(description='Optional conversation history from current session'),
+    'source': fields.String(description='Optional context hint (e.g. "notes", "grades:assignment:X") for better responses'),
+    'note_context': fields.String(description='Optional current note content when chatting from Notes view')
 })
 
 chat_response_output = api.model('ChatResponse', {
@@ -1800,9 +1802,11 @@ class ChatMessage(RestxResource):
         
         user_message = data['message']
         conversation_history = data.get('conversation_history', [])
+        source = data.get('source')
+        note_context = data.get('note_context')
         
         try:
-            result = chat_with_ai(user_id, user_message, conversation_history)
+            result = chat_with_ai(user_id, user_message, conversation_history, source=source, note_context=note_context)
             
             return {
                 'response': result['response'],
