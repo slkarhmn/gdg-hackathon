@@ -79,8 +79,7 @@ jobs:
           host: ${{ secrets.AZURE_VM_IP }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
-          source:
-            - "backend/"
+          source: "backend/"
           target: "/tmp/deploy/backend/"
 
       # ─── SCP: Copy frontend build ─────────────────────────────
@@ -90,8 +89,7 @@ jobs:
           host: ${{ secrets.AZURE_VM_IP }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
-          source:
-            - "frontend/dist/"
+          source: "frontend/dist/"
           target: "/tmp/deploy/frontend/dist/"
 
       # ─── SCP: Copy deploy script ──────────────────────────────
@@ -101,8 +99,7 @@ jobs:
           host: ${{ secrets.AZURE_VM_IP }}
           username: ${{ secrets.AZURE_VM_USER }}
           key: ${{ secrets.AZURE_VM_SSH_KEY }}
-          source:
-            - "deploy/setup.sh"
+          source: "deploy/setup.sh"
           target: "/tmp/deploy/"
 
       # ─── Run remote deploy script ─────────────────────────────
