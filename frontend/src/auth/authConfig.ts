@@ -16,11 +16,12 @@ export const msalConfig = {
 // Scopes define what permissions your app requests from the user
 export const loginRequest = {
   scopes: [
-    "User.Read", // Read user profile
-    "Calendars.ReadWrite", // Access Outlook calendar
-    "Tasks.ReadWrite", // Access Microsoft To Do
-    "Mail.Read", // Read emails (optional)
-    "offline_access", // Get refresh tokens
+    "User.Read",              // Read user profile
+    "Calendars.Read",         // ← ADDED: Read calendar (for fetching events)
+    "Calendars.ReadWrite",    // ← ALREADY PRESENT: Create/edit calendar events
+    "Tasks.ReadWrite",        // Access Microsoft To Do
+    "Mail.Read",              // Read emails (optional)
+    "offline_access",         // Get refresh tokens
   ],
 };
 
@@ -28,6 +29,8 @@ export const loginRequest = {
 export const graphConfig = {
   graphMeEndpoint: "https://graph.microsoft.com/v1.0/me",
   graphTasksEndpoint: "https://graph.microsoft.com/v1.0/me/todo/lists",
-  graphCalendarEndpoint: "https://graph.microsoft.com/v1.0/me/events",
+  // IMPORTANT: Changed from /me/events to /me/calendar/events
+  // The correct endpoint for calendar operations is /me/calendar/events
+  graphCalendarEndpoint: "https://graph.microsoft.com/v1.0/me/calendar/events",
   graphMailEndpoint: "https://graph.microsoft.com/v1.0/me/messages",
 };

@@ -3,8 +3,11 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_restx import Api, Resource, fields, Namespace
 from flask_cors import CORS
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 import json
 import os
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
@@ -165,11 +168,15 @@ ns_study_plans = Namespace('study-plans', description='Study plan operations')
 ns_spaced_reps = Namespace('spaced-repetitions', description='Spaced repetition operations')
 ns_assignments = Namespace('assignments', description='Assignment operations')
 
+# AI namespace — imported from ai_routes.py
+from ai_routes import ns_ai
+
 api.add_namespace(ns_users, path='/api/users')
 api.add_namespace(ns_notes, path='/api/notes')
 api.add_namespace(ns_study_plans, path='/api/study-plans')
 api.add_namespace(ns_spaced_reps, path='/api/spaced-repetitions')
 api.add_namespace(ns_assignments, path='/api/assignments')
+api.add_namespace(ns_ai, path='/api/ai')
 
 # User models
 user_input = api.model('UserInput', {
