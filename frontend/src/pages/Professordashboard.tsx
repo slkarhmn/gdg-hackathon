@@ -38,7 +38,7 @@ import {
   deleteCourse
 } from '../api/courses';
 import { DEFAULT_USER_ID } from '../api/config';
-import './ProfessorDashboard.css';
+import './Professordashboard.css';
 
 // Extended course with UI state
 interface CourseWithUI extends CourseData {
