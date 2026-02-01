@@ -1,7 +1,7 @@
 .calendar-container {
   display: flex;
   height: 100vh;
-    background-color: var(--bg-primary);
+  background-color: var(--bg-primary);
 
   overflow: hidden;
 }
@@ -998,7 +998,7 @@
   .calendar-content {
     grid-template-columns: 1fr;
   }
-  
+
   .events-sidebar {
     max-height: 500px;
   }
@@ -1008,19 +1008,19 @@
   .calendar-main {
     padding: 32px 24px;
   }
-  
+
   .calendar-section {
     padding: 20px;
   }
-  
+
   .calendar-grid {
     gap: 4px;
   }
-  
+
   .calendar-day {
     padding: 4px;
   }
-  
+
   .day-number {
     font-size: 12px;
   }
@@ -1150,5 +1150,346 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+.studybot-upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #5E8779 0%, #6B9B8E 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 16px;
+}
+
+.studybot-upload-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(94, 135, 121, 0.4);
+}
+
+/* Uploaded Files List */
+.uploaded-files-list {
+  background: #f8f9f7;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  animation: slideIn 0.3s ease-out;
+}
+
+.uploaded-files-list h5 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  color: #1F3236;
+}
+
+.uploaded-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.uploaded-file-item:last-child {
+  margin-bottom: 0;
+}
+
+.uploaded-file-item button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #dc3545;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.uploaded-file-item button:hover {
+  background: #fee;
+}
+
+/* Preferences Form */
+.preferences-form {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 16px;
+  padding: 20px;
+  margin: 16px 0;
+  animation: slideIn 0.3s ease-out;
+}
+
+.preferences-form h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 16px 0;
+  color: #2d3748;
+}
+
+.pref-group {
+  margin-bottom: 20px;
+}
+
+.pref-group:last-child {
+  margin-bottom: 0;
+}
+
+.pref-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4a5568;
+  margin-bottom: 8px;
+}
+
+/* Day Picker */
+.day-picker {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.day-btn {
+  padding: 8px 12px;
+  border: 2px solid #e2e8f0;
+  background: white;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #4a5568;
+}
+
+.day-btn.active {
+  background: #5E8779;
+  color: white;
+  border-color: #5E8779;
+}
+
+.day-btn:hover {
+  border-color: #5E8779;
+  transform: translateY(-1px);
+}
+
+/* Time Inputs */
+.time-inputs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.time-inputs input[type="time"] {
+  padding: 8px 12px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  color: #2d3748;
+  font-family: inherit;
+}
+
+.time-inputs span {
+  font-weight: 600;
+  color: #718096;
+}
+
+/* Range Slider */
+.pref-group input[type="range"] {
+  width: 100%;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.pref-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #5E8779;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pref-group input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.pref-group input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #5E8779;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+/* Generate Plan Button */
+.generate-plan-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #5E8779 0%, #6B9B8E 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.generate-plan-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(94, 135, 121, 0.4);
+}
+
+.generate-plan-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Plan Preview */
+.plan-preview {
+  background: white;
+  border: 2px solid #5E8779;
+  border-radius: 16px;
+  padding: 20px;
+  margin: 16px 0;
+  animation: slideIn 0.3s ease-out;
+}
+
+.plan-preview h4 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 16px 0;
+  color: #2d3748;
+}
+
+.plan-stats {
+  display: flex;
+  gap: 16px;
+}
+
+.plan-stats .stat {
+  flex: 1;
+  text-align: center;
+  padding: 12px;
+  background: #f7fafc;
+  border-radius: 10px;
+}
+
+.plan-stats .stat strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  color: #5E8779;
+  margin-bottom: 4px;
+}
+
+.plan-stats .stat span {
+  font-size: 11px;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* NEW: Plan actions (Customize + Save) */
+.plan-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.plan-action-btn {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.plan-action-btn.primary {
+  background: linear-gradient(135deg, #5E8779 0%, #6B9B8E 100%);
+  color: white;
+}
+
+.plan-action-btn.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.plan-action-btn.secondary {
+  background: #f3f4f6;
+  color: #1F3236;
+  border: 1px solid rgba(31, 50, 54, 0.15);
+}
+
+.plan-action-btn.secondary:hover {
+  transform: translateY(-1px);
+}
+
+.plan-action-btn.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(94, 135, 121, 0.25);
+}
+
+.plan-save-result {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1F3236;
+  background: #f8f9f7;
+  border: 1px solid rgba(31, 50, 54, 0.1);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+/* Continue Button */
+.studybot-continue-btn {
+  width: 100%;
+  padding: 12px;
+  background: #5E8779;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 12px;
+  transition: all 0.2s;
+}
+
+.studybot-continue-btn:hover {
+  background: #6B9B8E;
+  transform: translateY(-1px);
+}
+
+/* Slide-in animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

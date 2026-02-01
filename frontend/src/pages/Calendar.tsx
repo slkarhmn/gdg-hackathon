@@ -12,11 +12,13 @@ import {
   RotateCcw,
   Bot,
   CheckCircle,
-  ExternalLink
+  ExternalLink,
+  Upload,
+  X
 } from 'lucide-react';
 import { fetchAssignments, type BackendAssignment } from '../api/assignments';
 import { fetchStudyPlan, type StudyPlanResponse } from '../api/studyPlans';
-import { DEFAULT_USER_ID } from '../api/config';
+import { DEFAULT_USER_ID, API_BASE_URL } from '../api/config';
 import { useAuth } from '../auth/AuthContext';
 import { GraphService } from '../auth/graphService';
 import { AiChatAPI, type ChatMessage, type StudyPlan } from '../api/ai';
@@ -35,13 +37,51 @@ interface CalendarEvent {
   type: 'assignment' | 'exam' | 'class' | 'event';
   priority: 'high' | 'medium' | 'low';
   completed?: boolean;
-  outlookEventId?: string; // TypeScript: can be string or undefined (not null)
+  outlookEventId?: string;
 }
 
 type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades';
 
 interface CalendarProps {
   onNavigate: (page: Page) => void;
+}
+
+interface UploadedFile {
+  id: string;
+  name: string;
+  base64: string;
+  type: 'image' | 'pdf';
+}
+
+interface StudyPlanJSON {
+  metadata: {
+    timezone: string;
+    generatedAt: string;
+    weekStart: string;
+  };
+  inputs: {
+    modules: Array<{ moduleId: string; name: string }>;
+    deadlines: Array<{ title: string; dueAt: string; moduleId: string }>;
+    preferences: {
+      studyDays: string[];
+      dailyStart: string;
+      dailyEnd: string;
+      breakRule: { everyMinutes: number; breakMinutes: number };
+      maxSessionMinutes: number;
+    };
+  };
+  plan: Array<{
+    title: string;
+    type: 'study' | 'break';
+    moduleId?: string;
+    start: string;
+    end: string;
+    resources?: Array<{ label: string; url: string }>;
+  }>;
+  summary: {
+    totalStudyMinutes: number;
+    totalBreakMinutes: number;
+  };
 }
 
 // ===========================================================================
@@ -154,7 +194,7 @@ function outlookEventsToCalendarEvents(outlookEvents: Record<string, unknown>[])
         time: displayTime,
         type: 'event' as const,
         priority,
-        outlookEventId: e.id, // Store the Outlook ID
+        outlookEventId: e.id,
       };
     });
 }
@@ -170,47 +210,36 @@ function buildOutlookDateRange(): { startDate: string; endDate: string } {
   return { startDate: toISO(start), endDate: toISO(end) };
 }
 
-// ===========================================================================
-// Helper to add event to Outlook
-// ===========================================================================
-
 async function addToOutlook(
   event: CalendarEvent,
   graphService: GraphService
 ): Promise<string> {
-  // Parse the date and time
   const [year, month, day] = event.date.split('-').map(Number);
   const timeParts = event.time.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  
+
   if (!timeParts) {
     throw new Error('Invalid time format');
   }
 
-  let hours = parseInt(timeParts[1]);
-  const minutes = parseInt(timeParts[2]);
+  let hours = parseInt(timeParts[1], 10);
+  const minutes = parseInt(timeParts[2], 10);
   const period = timeParts[3].toUpperCase();
 
-  // Convert to 24-hour format
   if (period === 'PM' && hours !== 12) hours += 12;
   if (period === 'AM' && hours === 12) hours = 0;
 
-  // Create start date/time
   const startDate = new Date(year, month - 1, day, hours, minutes);
-  
-  // Determine duration based on event type
-  let durationMinutes = 60; // Default 1 hour
+  let durationMinutes = 60;
   if (event.type === 'assignment' || event.type === 'exam') {
-    durationMinutes = 120; // 2 hours for assignments/exams
+    durationMinutes = 120;
   }
-  
+
   const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
 
-  // Format for Graph API
   const formatForGraph = (date: Date) => {
-    return date.toISOString().slice(0, 19); // YYYY-MM-DDTHH:mm:ss
+    return date.toISOString().slice(0, 19);
   };
 
-  // Create event body
   const body = {
     subject: event.title,
     body: {
@@ -237,39 +266,222 @@ async function addToOutlook(
   return response.id;
 }
 
+// Convert generated StudyPlanJSON to CalendarEvent[] so it can render on the calendar grid
+function studyPlanJSONToCalendarEvents(plan: StudyPlanJSON): CalendarEvent[] {
+  return plan.plan
+    .filter((p) => p.type === 'study')
+    .map((p) => {
+      const start = new Date(p.start);
+      const dateStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+      const h = start.getHours();
+      const m = start.getMinutes();
+      const period = h >= 12 ? 'PM' : 'AM';
+      const hour = h % 12 || 12;
+      const displayTime = `${hour}:${m.toString().padStart(2, '0')} ${period}`;
+
+      return {
+        id: `generated-study-${p.start}-${p.end}`,
+        title: p.title,
+        subject: p.moduleId ?? 'Study Session',
+        date: dateStr,
+        time: displayTime,
+        type: 'class',
+        priority: 'medium',
+      };
+    });
+}
+
 // ===========================================================================
-// StudyBotPanel component
+// StudyBotPanel component - UPDATED (adds Customize + Save to Outlook)
 // ===========================================================================
 
 interface StudyBotPanelProps {
   assignments: BackendAssignment[];
+  onPlanGenerated?: (plan: StudyPlanJSON) => void;
 }
 
-const STARTER_PROMPTS = [
-  "Help me create a study plan",
-  "I have exams coming up soon",
-  "How should I prioritise my subjects?",
-  "I need a weekly study schedule",
-];
-
-const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments }) => {
+const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenerated }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState<StudyPlan | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [extractedInfo, setExtractedInfo] = useState<string>("");
+  const [showPreferences, setShowPreferences] = useState(false);
+  const [generatedPlanJSON, setGeneratedPlanJSON] = useState<StudyPlanJSON | null>(null);
+
+  const [preferences, setPreferences] = useState({
+    studyDays: [] as string[],
+    dailyStart: "18:00",
+    dailyEnd: "22:00",
+    breakEveryMinutes: 50,
+    breakDuration: 10,
+    maxSessionMinutes: 90,
+  });
+
+  const { isAuthenticated, getAccessToken } = useAuth();
+
+  const [savingToOutlook, setSavingToOutlook] = useState(false);
+  const [saveResult, setSaveResult] = useState<string>("");
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isFreshSession = messages.length === 0;
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, showPreferences, generatedPlanJSON, saveResult]);
 
   useEffect(() => {
     AiChatAPI.getHistory(DEFAULT_USER_ID).then((hist) => {
       if (hist.length > 0) setMessages(hist);
     });
   }, []);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const newFiles: UploadedFile[] = [];
+
+    for (const file of files) {
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      newFiles.push({
+        id: Math.random().toString(36).substr(2, 9),
+        name: file.name,
+        base64,
+        type: file.type.startsWith('image/') ? 'image' : 'pdf',
+      });
+    }
+
+    setUploadedFiles((prev) => [...prev, ...newFiles]);
+
+    if (newFiles.length > 0) {
+      // IMPORTANT: use local list to avoid stale state
+      await parseFiles([...uploadedFiles, ...newFiles]);
+    }
+  };
+
+  const parseFiles = async (files: UploadedFile[]) => {
+    setLoading(true);
+    try {
+      const res = await fetch(API_BASE_URL + '/ai/parse-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: files.map((f) => {
+            return { type: f.type, base64: f.base64, filename: f.name };
+          })
+        }),
+      });
+
+      const data = await res.json();
+      setExtractedInfo(data.extracted_text);
+      setShowPreferences(true);
+
+      const parsedMessage = '✅ Files parsed! Here\'s what I found:\n\n' + data.extracted_text + '\n\nNow let\'s set your study preferences.';
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: parsedMessage }
+      ]);
+    } catch (error) {
+      console.error('Failed to parse files:', error);
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I couldn\'t parse those files. Please try again.' }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGeneratePlan = async () => {
+    if (preferences.studyDays.length === 0) {
+      alert('Please select at least one study day');
+      return;
+    }
+
+    setLoading(true);
+    setSaveResult('');
+
+    try {
+      const modules = assignments.map((a, i) => {
+        const moduleName = Array.isArray(a.tags) && a.tags.length > 0 ? a.tags[0] : 'General';
+        return {
+          moduleId: 'MOD' + (i + 1),
+          name: moduleName,
+        };
+      });
+
+      const deadlines = assignments.map((a, i) => {
+        return {
+          title: a.name,
+          dueAt: a.due_date,
+          moduleId: 'MOD' + (i + 1),
+        };
+      });
+
+      const prefs = {
+        studyDays: preferences.studyDays,
+        dailyStart: preferences.dailyStart,
+        dailyEnd: preferences.dailyEnd,
+        breakRule: {
+          everyMinutes: preferences.breakEveryMinutes,
+          breakMinutes: preferences.breakDuration,
+        },
+        maxSessionMinutes: preferences.maxSessionMinutes,
+      };
+
+      const res = await fetch(API_BASE_URL + '/ai/generate-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          modules: modules,
+          deadlines: deadlines,
+          preferences: prefs,
+          timezone: 'Asia/Dubai',
+        }),
+      });
+
+      const plan: StudyPlanJSON = await res.json();
+      setGeneratedPlanJSON(plan);
+
+      // Push into parent calendar grid (optional but we wired it in)
+      onPlanGenerated?.(plan);
+
+      const breakCount = plan.plan.filter((p) => p.type === 'break').length;
+      const successMessage =
+        '🎉 Your study plan is ready! It includes ' +
+        plan.summary.totalStudyMinutes +
+        ' minutes of study time with ' +
+        breakCount +
+        ' breaks. You can customize it or save it to Outlook below.';
+
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: successMessage }
+      ]);
+    } catch (error) {
+      console.error('Failed to generate plan:', error);
+      setMessages((prev) => [...prev, { role: 'assistant', content: 'Sorry, I couldn\'t generate the plan. Please try again.' }]);
+    } finally {
+      setLoading(false);
+      setShowPreferences(false);
+    }
+  };
+
+  const toggleStudyDay = (day: string) => {
+    setPreferences((prev) => ({
+      ...prev,
+      studyDays: prev.studyDays.includes(day)
+        ? prev.studyDays.filter((d) => d !== day)
+        : [...prev.studyDays, day],
+    }));
+  };
 
   const send = useCallback(async (text: string) => {
     const trimmed = text.trim();
@@ -297,6 +509,62 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments }) => {
     await AiChatAPI.reset(DEFAULT_USER_ID);
     setMessages([]);
     setGeneratedPlan(null);
+    setUploadedFiles([]);
+    setExtractedInfo("");
+    setShowPreferences(false);
+    setGeneratedPlanJSON(null);
+    setSaveResult("");
+  };
+
+  const savePlanToOutlook = async () => {
+    if (!generatedPlanJSON) return;
+
+    if (!isAuthenticated) {
+      setSaveResult('Please sign in to save to Outlook.');
+      return;
+    }
+
+    setSavingToOutlook(true);
+    setSaveResult('');
+
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('Failed to get access token');
+
+      const graphService = new GraphService(token);
+
+      const studySessions = generatedPlanJSON.plan.filter((p) => p.type === 'study');
+
+      const toGraphDateTime = (d: Date) => d.toISOString().slice(0, 19);
+
+      let created = 0;
+      for (const s of studySessions) {
+        const startDate = new Date(s.start);
+        const endDate = new Date(s.end);
+
+        await graphService.createCalendarEvent({
+          subject: s.title,
+          body: {
+            contentType: 'text',
+            content: `Study session\n\nModule: ${s.moduleId ?? 'N/A'}\n\nCreated from Study Helper App`,
+          },
+          start: { dateTime: toGraphDateTime(startDate), timeZone: 'UTC' },
+          end: { dateTime: toGraphDateTime(endDate), timeZone: 'UTC' },
+          categories: ['Study Helper', 'study'],
+          isReminderOn: true,
+          reminderMinutesBeforeStart: 15,
+        } as any);
+
+        created += 1;
+      }
+
+      setSaveResult(`✅ Saved ${created} study sessions to Outlook.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      setSaveResult(`❌ Failed to save to Outlook: ${msg}`);
+    } finally {
+      setSavingToOutlook(false);
+    }
   };
 
   const renderPlanPreview = () => {
@@ -330,7 +598,7 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments }) => {
   const renderMessage = (msg: ChatMessage, idx: number) => {
     const isBot = msg.role === "assistant";
     let displayContent = msg.content;
-    
+
     if (isBot) {
       displayContent = displayContent.replace(/```json[\s\S]*?```/g, "").trim();
       if (!displayContent) {
@@ -346,7 +614,7 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments }) => {
           </div>
         )}
         <div className="bot-bubble">
-          <p>{displayContent}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{displayContent}</p>
         </div>
       </div>
     );
@@ -365,25 +633,149 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments }) => {
       </div>
 
       <div className="studybot-messages">
-        {isFreshSession && (
+        {isFreshSession && uploadedFiles.length === 0 && (
           <div className="studybot-welcome">
             <div className="studybot-welcome-icon">
               <Bot size={36} />
             </div>
             <h4>Hi, I'm StudyBot</h4>
-            <p>I'll help you build a personalised study plan based on your upcoming assignments.</p>
-            <div className="studybot-starters">
-              {STARTER_PROMPTS.map((prompt) => (
-                <button key={prompt} className="studybot-starter-btn" onClick={() => send(prompt)}>
-                  {prompt}
+            <p>Upload your syllabus or assignment list, and I'll create a personalized study plan for you.</p>
+            <button
+              className="studybot-upload-btn"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload size={18} />
+              Upload Files
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+          </div>
+        )}
+
+        {uploadedFiles.length > 0 && (
+          <div className="uploaded-files-list">
+            <h5>📎 Uploaded Files:</h5>
+            {uploadedFiles.map((file) => (
+              <div key={file.id} className="uploaded-file-item">
+                <span>{file.name}</span>
+                <button onClick={() => setUploadedFiles((prev) => prev.filter((f) => f.id !== file.id))}>
+                  <X size={14} />
                 </button>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         )}
 
         {messages.map(renderMessage)}
         {renderPlanPreview()}
+
+        {showPreferences && (
+          <div className="preferences-form">
+            <h4>📅 Study Preferences</h4>
+
+            <div className="pref-group">
+              <label>Which days do you want to study?</label>
+              <div className="day-picker">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    className={`day-btn ${preferences.studyDays.includes(day) ? 'active' : ''}`}
+                    onClick={() => toggleStudyDay(day)}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="pref-group">
+              <label>Daily study hours</label>
+              <div className="time-inputs">
+                <input
+                  type="time"
+                  value={preferences.dailyStart}
+                  onChange={(e) => setPreferences((prev) => {
+                    return { ...prev, dailyStart: e.target.value };
+                  })}
+                />
+                <span>to</span>
+                <input
+                  type="time"
+                  value={preferences.dailyEnd}
+                  onChange={(e) => setPreferences((prev) => {
+                    return { ...prev, dailyEnd: e.target.value };
+                  })}
+                />
+              </div>
+            </div>
+
+            <div className="pref-group">
+              <label>Break every {preferences.breakEveryMinutes} min</label>
+              <input
+                type="range"
+                min="30"
+                max="90"
+                value={preferences.breakEveryMinutes}
+                onChange={(e) => setPreferences((prev) => {
+                  return { ...prev, breakEveryMinutes: Number(e.target.value) };
+                })}
+              />
+            </div>
+
+            <button className="generate-plan-btn" onClick={handleGeneratePlan} disabled={loading}>
+              {loading ? 'Generating...' : '✨ Generate Study Plan'}
+            </button>
+          </div>
+        )}
+
+        {generatedPlanJSON && (
+          <div className="plan-preview">
+            <h4>📋 Your Study Plan</h4>
+            <div className="plan-stats">
+              <div className="stat">
+                <strong>{Math.floor(generatedPlanJSON.summary.totalStudyMinutes / 60)}h {generatedPlanJSON.summary.totalStudyMinutes % 60}m</strong>
+                <span>Total Study Time</span>
+              </div>
+              <div className="stat">
+                <strong>{generatedPlanJSON.plan.filter((p) => p.type === 'study').length}</strong>
+                <span>Study Sessions</span>
+              </div>
+              <div className="stat">
+                <strong>{generatedPlanJSON.plan.filter((p) => p.type === 'break').length}</strong>
+                <span>Breaks</span>
+              </div>
+            </div>
+
+            <div className="plan-actions">
+              <button
+                type="button"
+                className="plan-action-btn secondary"
+                onClick={() => setShowPreferences(true)}
+              >
+                Customize
+              </button>
+
+              <button
+                type="button"
+                className="plan-action-btn primary"
+                onClick={savePlanToOutlook}
+                disabled={savingToOutlook}
+                title={!isAuthenticated ? 'Sign in to save to Outlook' : ''}
+              >
+                {savingToOutlook ? 'Saving…' : 'Save to Outlook'}
+              </button>
+            </div>
+
+            {saveResult && <div className="plan-save-result">{saveResult}</div>}
+          </div>
+        )}
 
         {loading && (
           <div className="bot-message assistant">
@@ -399,25 +791,37 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments }) => {
         <div ref={scrollRef} />
       </div>
 
-      <div className="studybot-input-bar">
-        <input
-          ref={inputRef}
-          type="text"
-          className="studybot-input"
-          placeholder="Ask me anything about your study plan…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
-          disabled={loading}
-        />
+      {!showPreferences && uploadedFiles.length > 0 && !generatedPlanJSON && (
         <button
-          className="studybot-send-btn"
-          onClick={() => send(input)}
-          disabled={loading || !input.trim()}
+          type="button"
+          className="studybot-continue-btn"
+          onClick={() => setShowPreferences(true)}
         >
-          <Send size={18} />
+          Continue to Preferences →
         </button>
-      </div>
+      )}
+
+      {!uploadedFiles.length && messages.length === 0 && (
+        <div className="studybot-input-bar">
+          <input
+            ref={inputRef}
+            type="text"
+            className="studybot-input"
+            placeholder="Ask me anything about your study plan…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") send(input); }}
+            disabled={loading}
+          />
+          <button
+            className="studybot-send-btn"
+            onClick={() => send(input)}
+            disabled={loading || !input.trim()}
+          >
+            <Send size={18} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -434,7 +838,7 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'events' | 'studybot'>('events');
+  const [sidebarTab, setSidebarTab] = useState<'events' | 'studybot'>('studybot');
   const [rawAssignments, setRawAssignments] = useState<BackendAssignment[]>([]);
   const [addingToOutlook, setAddingToOutlook] = useState<Set<string>>(new Set());
 
@@ -807,7 +1211,20 @@ const Calendar: React.FC<CalendarProps> = ({ onNavigate }) => {
             )}
 
             {sidebarTab === 'studybot' && (
-              <StudyBotPanel assignments={rawAssignments} />
+              <StudyBotPanel
+                assignments={rawAssignments}
+                onPlanGenerated={(plan) => {
+                  const newEvents = studyPlanJSONToCalendarEvents(plan);
+                  setEvents((prev) => {
+                    const existing = new Set(prev.map((e) => e.id));
+                    const merged = [...prev];
+                    for (const ev of newEvents) {
+                      if (!existing.has(ev.id)) merged.push(ev);
+                    }
+                    return merged;
+                  });
+                }}
+              />
             )}
           </div>
         </div>
