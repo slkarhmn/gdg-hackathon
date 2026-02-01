@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { useGraphService } from './auth/graphService';
 import { AIChatProvider } from './contexts/AIChatContext';
@@ -10,6 +11,8 @@ import Calendar from './pages/Calendar';
 import ToDo from './pages/ToDo';
 import GetHelp from './pages/GetHelp';
 import ProfessorDashboard from './pages/Professordashboard';
+import Pricing from './pages/Pricing';
+import AuthCallback from './components/AuthCallback';
 import type { BackendNote } from './api';
 import './styles/globals.css';
 
@@ -24,7 +27,7 @@ export interface OpenTab {
 // Main App Component (wrapped with auth)
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
-  const { isAuthenticated, isLoading, account, getAccessToken } = useAuth();
+  const { isAuthenticated, isLoading, account, getAccessToken, login } = useAuth();
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [notesPreloadedNote, setNotesPreloadedNote] = useState<BackendNote | null>(null);
   const [viewMode, setViewMode] = useState<'student' | 'professor'>('student');
@@ -79,6 +82,11 @@ function AppContent() {
     setNotesActiveTabId(tabId);
   }, []);
 
+  // Allow access to pricing page without authentication (check first, before loading screen)
+  if (currentPage === 'pricing') {
+    return <Pricing onNavigate={handleNavigate} onSignIn={login} />;
+  }
+
   // Show loading screen while checking authentication
   if (isLoading) {
     return (
@@ -100,7 +108,7 @@ function AppContent() {
             margin: '0 auto 16px',
           }} />
           <p style={{ color: '#5a5a5a', fontSize: '14px', fontWeight: 500 }}>
-            Loading StudySync...
+            Loading Productive...
           </p>
         </div>
       </div>
@@ -109,7 +117,7 @@ function AppContent() {
 
   // Show login page if not authenticated
   if (!isAuthenticated) {
-    return <Login />;
+    return <Login onNavigate={handleNavigate} />;
   }
 
   // Render appropriate page
@@ -144,11 +152,13 @@ function AppContent() {
         return <Calendar onNavigate={handleNavigate} {...pageProps} />;
       case 'files':
       case 'todo':
-        return <ToDo onNavigate={handleNavigate} {...pageProps} />;
+        return <ToDo onNavigate={handleNavigate} graphService={graphService} />;
       case 'help':
         return <GetHelp onNavigate={handleNavigate} {...pageProps} />;
       case 'professor':
         return <ProfessorDashboard onNavigate={handleNavigate} {...pageProps} />;
+      case 'pricing':
+        return <Pricing onNavigate={handleNavigate} onSignIn={login} />;
       default:
         return <Dashboard onNavigate={handleNavigate} {...pageProps} />;
     }
@@ -165,7 +175,13 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/pricing" element={<AppContent />} />
+          <Route path="*" element={<AppContent />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   );
 }

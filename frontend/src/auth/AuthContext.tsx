@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { PublicClientApplication } from '@azure/msal-browser';
+import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-browser';
 import { msalConfig, loginRequest } from './authConfig';
 
 interface AuthContextType {
@@ -42,6 +42,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const response = await msalInstance.handleRedirectPromise();
         if (response?.account) {
           setAccount(response.account);
+          
+          // ✅ NEW: Save access token to localStorage after redirect
+          if (response.accessToken) {
+            localStorage.setItem('microsoft_access_token', response.accessToken);
+            console.log('✅ Access token saved to localStorage');
+          }
         }
         
         const accounts = msalInstance.getAllAccounts();
@@ -92,19 +98,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!account || isGuest) return null;
 
     try {
+      // acquireTokenSilent will throw InteractionRequiredAuthError if the
+      // cached token is missing scopes (e.g. Calendars.ReadWrite was added
+      // after the user first logged in, or consent was never completed).
+      // We catch that specific error and fall through to a redirect-based
+      // consent flow so the user is prompted to grant the new permissions.
       const response = await msalInstance.acquireTokenSilent({
         ...loginRequest,
         account: account,
       });
+      
+      // ✅ NEW: Save token to localStorage whenever we get a fresh one
+      if (response.accessToken) {
+        localStorage.setItem('microsoft_access_token', response.accessToken);
+      }
+      
       return response.accessToken;
     } catch (error) {
-      try {
-        const response = await msalInstance.acquireTokenPopup(loginRequest);
-        return response.accessToken;
-      } catch (popupError) {
-        console.error('Token acquisition error:', popupError);
+      // Only redirect for consent/scope errors. Other errors (network, etc.)
+      // should not silently trigger a full-page redirect.
+      if (error instanceof InteractionRequiredAuthError) {
+        // loginRedirect does not return — it navigates away. The token will
+        // be available on the next page load via handleRedirectPromise above.
+        // We pass `prompt: 'consent'` to force Microsoft to show the
+        // permission screen again even if a previous (incomplete) consent exists.
+        await msalInstance.loginRedirect({
+          ...loginRequest,
+          prompt: 'consent',
+        });
+        // This line is never reached due to the redirect, but satisfies TS.
         return null;
       }
+
+      console.error('Token acquisition error:', error);
+      return null;
     }
   };
 

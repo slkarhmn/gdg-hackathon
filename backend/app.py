@@ -1,4 +1,3 @@
-# from venv import logger
 from flask import Flask, request, send_file, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_restx import Api, Resource as RestxResource, fields, Namespace
@@ -7,33 +6,18 @@ from datetime import datetime, timedelta
 from werkzeug.utils import secure_filename
 import json
 import os
+import logging
+import uuid
+import mimetypes
+
+from dotenv import load_dotenv
+from microsoft_routes import register_microsoft_routes
 from ai_notes import (
     extract_text_from_note,
     generate_summary_and_questions,
     export_note_as_docx,
     export_note_as_pdf
 )
-from dotenv import load_dotenv
-load_dotenv()  # This will load variables from .env into os.environ
-
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | app | %(message)s"
-)
-
-logger = logging.getLogger(__name__)
-
-
-import uuid
-import mimetypes
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
-# Import AI chat functionality
 from ai_chat import (
     initialize_openai,
     chat_with_ai,
@@ -43,6 +27,16 @@ from ai_chat import (
     get_context_stats
 )
 
+# Load environment variables once
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | app | %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 # Initialize OpenAI on startup
 try:
     initialize_openai()
@@ -50,8 +44,16 @@ except Exception as e:
     print(f"Warning: Could not initialize OpenAI: {e}")
 
 app = Flask(__name__)
-CORS(app)
+# CORS(app)
 
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:5173", "http://localhost:3000"],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True
+    }
+})
 # Database configuration
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'study_app.db')
@@ -98,6 +100,7 @@ api = Api(
 )
 
 db = SQLAlchemy(app)
+register_microsoft_routes(api)
 
 # =============================================================================
 # MODELS

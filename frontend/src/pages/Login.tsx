@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { Loader2, LogIn } from 'lucide-react';
+import { Loader2, BookOpen, Brain, Calendar, Users, Sparkles, TrendingUp } from 'lucide-react';
 import './Login.css';
 
 const Login: React.FC = () => {
@@ -17,102 +17,106 @@ const Login: React.FC = () => {
     }
   };
 
+  const handlePricingClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    onNavigate('pricing');
+  };
+
   return (
     <div className="login-container">
-      <div className="login-card">
-        <div className="login-header">
-          <div className="logo-large">
-            <div className="logo-icon-large">
-              <svg
-                width="48"
-                height="48"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
+      <div className="login-split">
+        {/* Left Side - Branding */}
+        <div className="login-left">
+          <div className="login-branding">
+            <div className="brand-logo">
+              <div className="logo-icon-main">
+                <BookOpen size={40} strokeWidth={2} />
+              </div>
+              <h1 className="brand-name">Productive</h1>
+            </div>
+            <p className="brand-tagline">Your AI-Powered Study Companion</p>
+
+            <div className="features-showcase">
+              <div className="feature-highlight">
+                <div className="feature-icon">
+                  <Brain size={24} />
+                </div>
+                <div className="feature-text">
+                  <h3>AI-Powered Notes</h3>
+                  <p>Automatically generate comprehensive study materials</p>
+                </div>
+              </div>
+
+              <div className="feature-highlight">
+                <div className="feature-icon">
+                  <Calendar size={24} />
+                </div>
+                <div className="feature-text">
+                  <h3>Smart Scheduling</h3>
+                  <p>Intelligent study plans tailored to your deadlines</p>
+                </div>
+              </div>
+
+              <div className="feature-highlight">
+                <div className="feature-icon">
+                  <Users size={24} />
+                </div>
+                <div className="feature-text">
+                  <h3>Collaborative Learning</h3>
+                  <p>Sync with Microsoft To Do and Outlook Calendar</p>
+                </div>
+              </div>
+
+              <div className="feature-highlight">
+                <div className="feature-icon">
+                  <TrendingUp size={24} />
+                </div>
+                <div className="feature-text">
+                  <h3>Track Progress</h3>
+                  <p>Spaced repetition and performance analytics</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="trust-indicators">
+              <div className="trust-item">
+                <Sparkles size={16} />
+                <span>Powered by Azure AI</span>
+              </div>
+              <div className="trust-item">
+                <span className="security-badge">ðŸ”’ Secure Microsoft Login</span>
+              </div>
             </div>
           </div>
-          <h1 className="login-title">StudySync</h1>
-          <p className="login-subtitle">Your AI-powered study management platform</p>
         </div>
 
-        <div className="login-body">
-          <div className="features-list">
-            <div className="feature-item">
-              <div className="feature-icon">📚</div>
-              <div className="feature-text">
-                <h3>Organize Your Studies</h3>
-                <p>Keep all your notes, assignments, and deadlines in one place</p>
-              </div>
+        {/* Right Side - Login Form */}
+        <div className="login-right">
+          <div className="login-form-container">
+            <div className="login-header">
+              <h2>Welcome Back</h2>
+              <p>Sign in with your university Microsoft account to continue</p>
             </div>
 
-            <div className="feature-item">
-              <div className="feature-icon">🤖</div>
-              <div className="feature-text">
-                <h3>AI-Powered Assistance</h3>
-                <p>Get intelligent help with your coursework and study planning</p>
-              </div>
-            </div>
-
-            <div className="feature-item">
-              <div className="feature-icon">📅</div>
-              <div className="feature-text">
-                <h3>Sync with Microsoft</h3>
-                <p>Connect with Outlook Calendar and Microsoft To Do</p>
-              </div>
-            </div>
-          </div>
-
-          {error && (
-            <div className="error-message">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <span>{error}</span>
-            </div>
-          )}
-
-          <button
-            className="microsoft-login-btn"
-            onClick={handleLogin}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <>
-                <Loader2 size={20} className="spinner" />
-                <span>Signing in...</span>
-              </>
-            ) : (
-              <>
-                <svg className="microsoft-icon" width="20" height="20" viewBox="0 0 23 23">
-                  <rect x="1" y="1" width="10" height="10" fill="#f25022"/>
-                  <rect x="12" y="1" width="10" height="10" fill="#7fba00"/>
-                  <rect x="1" y="12" width="10" height="10" fill="#00a4ef"/>
-                  <rect x="12" y="12" width="10" height="10" fill="#ffb900"/>
+            {error && (
+              <div className="error-message">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
-                <span>Sign in with Microsoft</span>
-              </>
+                <span>{error}</span>
+              </div>
             )}
-          </button>
 
           <button
             className="guest-login-btn"
@@ -128,8 +132,29 @@ const Login: React.FC = () => {
           </p>
         </div>
 
-        <div className="login-footer">
-          <p>Built for ASUS Copilot Challenge 2026</p>
+            <button 
+              className="pricing-link" 
+              onClick={handlePricingClick}
+              style={{ cursor: 'pointer', border: 'none', display: 'block', width: '100%' }}
+            >
+              View Pricing & Plans
+            </button>
+
+            <p className="login-info">
+              By signing in, you agree to our Terms of Service and Privacy Policy
+            </p>
+          </div>
+
+          <div className="login-footer-right">
+            <p>Built for ASUS Copilot Challenge 2026</p>
+            <div className="footer-links">
+              <a href="#" onClick={handlePricingClick}>Pricing</a>
+              <span>•</span>
+              <a href="#about">About</a>
+              <span>•</span>
+              <a href="#support">Support</a>
+            </div>
+          </div>
         </div>
       </div>
     </div>
