@@ -45,9 +45,13 @@ cp -r "$DEPLOY_DIR/frontend/dist" "$APP_DIR/frontend/dist"
 
 # ─── 5. Setup Python virtual environment & install deps ────
 echo "[5/7] Setting up Python virtual environment..."
+
+# Create venv if it doesn't exist
 if [ ! -d "$VENV_DIR" ]; then
   python3 -m venv "$VENV_DIR"
 fi
+
+# Always activate and update dependencies
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip -q
 pip install -r "$APP_DIR/backend/requirements.txt" -q
