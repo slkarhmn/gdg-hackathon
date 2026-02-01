@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/layout/Sidebar';
 import {
     Plus,
@@ -19,9 +19,13 @@ import {
     List as ListIcon,
     BookOpen,
     Home,
-    Target
+    Target,
+    RefreshCw,
+    Cloud,
+    CloudOff
 } from 'lucide-react';
 import './ToDo.css';
+import { GraphService, type MicrosoftTask, type MicrosoftTaskList } from '../auth/graphService';
 
 interface Task {
     id: string;
@@ -35,6 +39,8 @@ interface Task {
     notes?: string;
     steps?: SubTask[];
     listId: string;
+    microsoftId?: string; // ID from Microsoft To Do
+    isSynced: boolean; // Whether this task is synced with Microsoft
 }
 
 interface SubTask {
@@ -49,30 +55,34 @@ interface TaskList {
     icon: string;
     color: string;
     taskCount: number;
+    microsoftId?: string; // ID from Microsoft To Do
 }
 
 type Page = 'dashboard' | 'notes' | 'calendar' | 'analytics' | 'files' | 'grades' | 'todo';
 
 interface ToDoProps {
     onNavigate: (page: Page) => void;
+    graphService?: GraphService | null;
 }
 
-const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
+const ToDo: React.FC<ToDoProps> = ({ onNavigate, graphService }) => {
     const [mainSidebarTab, setMainSidebarTab] = useState('todo');
     const [selectedList, setSelectedList] = useState<string>('my-day');
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [showAddTask, setShowAddTask] = useState(false);
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [syncStatus, setSyncStatus] = useState<'synced' | 'offline' | 'syncing'>('offline');
+    const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
-    const [lists] = useState<TaskList[]>([
-        { id: 'my-day', name: 'My Day', icon: 'sun', color: '#6B9080', taskCount: 3 },
-        { id: 'important', name: 'Important', icon: 'star', color: '#E76F51', taskCount: 2 },
-        { id: 'planned', name: 'Planned', icon: 'calendar', color: '#A4C3B2', taskCount: 5 },
-        { id: 'assignments', name: 'Assignments', icon: 'book', color: '#F4A261', taskCount: 4 },
-        { id: 'personal', name: 'Personal', icon: 'home', color: '#6B9080', taskCount: 2 },
-        { id: 'study-goals', name: 'Study Goals', icon: 'target', color: '#CCE3DE', taskCount: 3 },
+    const [lists, setLists] = useState<TaskList[]>([
+        { id: 'my-day', name: 'My Day', icon: 'sun', color: '#6B9080', taskCount: 0 },
+        { id: 'important', name: 'Important', icon: 'star', color: '#E76F51', taskCount: 0 },
+        { id: 'planned', name: 'Planned', icon: 'calendar', color: '#A4C3B2', taskCount: 0 },
     ]);
+
+    const [tasks, setTasks] = useState<Task[]>([]);
 
     // Helper function to render icons
     const renderIcon = (iconName: string, size: number = 20, color?: string) => {
@@ -88,108 +98,270 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
         }
     };
 
-    const [tasks, setTasks] = useState<Task[]>([
-        {
-            id: '1',
-            title: 'Complete HCI Assignment 3',
-            completed: false,
-            important: true,
-            myDay: true,
-            dueDate: '2026-02-05',
-            listId: 'assignments',
-            notes: 'Focus on user research methods and create wireframes',
-            steps: [
-                { id: '1-1', title: 'Research user personas', completed: true },
-                { id: '1-2', title: 'Create wireframes', completed: false },
-                { id: '1-3', title: 'Write report', completed: false },
-            ]
-        },
-        {
-            id: '2',
-            title: 'Review Data Structures notes',
-            completed: false,
-            important: false,
-            myDay: true,
-            dueDate: '2026-02-02',
-            listId: 'study-goals',
-        },
-        {
-            id: '3',
-            title: 'Prepare for Database midterm',
-            completed: false,
-            important: true,
-            myDay: true,
-            dueDate: '2026-02-10',
-            listId: 'study-goals',
-            reminder: '2026-02-09T09:00',
-        },
-        {
-            id: '4',
-            title: 'Submit project proposal',
-            completed: false,
-            important: false,
-            myDay: false,
-            dueDate: '2026-02-08',
-            listId: 'assignments',
-        },
-        {
-            id: '5',
-            title: 'Buy groceries',
-            completed: false,
-            important: false,
-            myDay: false,
-            listId: 'personal',
-        },
-        {
-            id: '6',
-            title: 'Call dentist',
-            completed: true,
-            important: false,
-            myDay: false,
-            dueDate: '2026-01-30',
-            listId: 'personal',
-        },
-    ]);
+    // Transform Microsoft Task to our Task format
+    const transformMicrosoftTask = (
+        msTask: MicrosoftTask,
+        listId: string,
+        microsoftListId: string
+    ): Task => {
+        return {
+            id: `ms-${msTask.id}`,
+            microsoftId: msTask.id,
+            title: msTask.title,
+            completed: msTask.status === 'completed',
+            important: msTask.importance === 'high',
+            myDay: false, // Microsoft To Do doesn't have this concept
+            listId: listId,
+            dueDate: msTask.dueDateTime?.dateTime,
+            reminder: msTask.reminderDateTime?.dateTime,
+            notes: msTask.body?.content,
+            isSynced: true,
+        };
+    };
+
+    // Transform our Task to Microsoft Task format
+    const transformToMicrosoftTask = (task: Task): Partial<MicrosoftTask> => {
+        const msTask: any = {
+            title: task.title,
+            status: task.completed ? 'completed' : 'notStarted',
+            importance: task.important ? 'high' : 'normal',
+            isReminderOn: !!task.reminder,
+        };
+
+        if (task.dueDate) {
+            msTask.dueDateTime = {
+                dateTime: task.dueDate,
+                timeZone: 'UTC',
+            };
+        }
+
+        if (task.reminder) {
+            msTask.reminderDateTime = {
+                dateTime: task.reminder,
+                timeZone: 'UTC',
+            };
+        }
+
+        if (task.notes) {
+            msTask.body = {
+                content: task.notes,
+                contentType: 'text',
+            };
+        }
+
+        return msTask;
+    };
+
+    // Sync tasks from Microsoft To Do
+    const syncFromMicrosoft = async () => {
+        if (!graphService) {
+            setSyncStatus('offline');
+            return;
+        }
+
+        try {
+            setIsSyncing(true);
+            setSyncStatus('syncing');
+
+            // Get all task lists from Microsoft
+            const msLists = await graphService.getTaskLists();
+
+            // Update our lists
+            const updatedLists: TaskList[] = [
+                { id: 'my-day', name: 'My Day', icon: 'sun', color: '#6B9080', taskCount: 0 },
+                { id: 'important', name: 'Important', icon: 'star', color: '#E76F51', taskCount: 0 },
+                { id: 'planned', name: 'Planned', icon: 'calendar', color: '#A4C3B2', taskCount: 0 },
+            ];
+
+            // Add Microsoft lists
+            const listIconMap: { [key: string]: string } = {
+                'tasks': 'target',
+                'assignments': 'book',
+                'personal': 'home',
+            };
+
+            msLists.forEach((msList) => {
+                const listName = msList.displayName.toLowerCase();
+                const icon = listIconMap[listName] || 'target';
+                
+                updatedLists.push({
+                    id: `ms-${msList.id}`,
+                    microsoftId: msList.id,
+                    name: msList.displayName,
+                    icon,
+                    color: '#6B9080',
+                    taskCount: 0,
+                });
+            });
+
+            // Get all tasks from all Microsoft lists
+            const allMsTasks: Task[] = [];
+            for (const list of updatedLists) {
+                if (list.microsoftId) {
+                    const msTasks = await graphService.getTasks(list.microsoftId);
+                    const transformedTasks = msTasks.map((msTask) =>
+                        transformMicrosoftTask(msTask, list.id, list.microsoftId!)
+                    );
+                    allMsTasks.push(...transformedTasks);
+                }
+            }
+
+            // Update task counts
+            updatedLists.forEach((list) => {
+                if (list.id === 'my-day') {
+                    list.taskCount = allMsTasks.filter((t) => t.myDay && !t.completed).length;
+                } else if (list.id === 'important') {
+                    list.taskCount = allMsTasks.filter((t) => t.important && !t.completed).length;
+                } else if (list.id === 'planned') {
+                    list.taskCount = allMsTasks.filter((t) => t.dueDate && !t.completed).length;
+                } else {
+                    list.taskCount = allMsTasks.filter((t) => t.listId === list.id && !t.completed).length;
+                }
+            });
+
+            setLists(updatedLists);
+            setTasks(allMsTasks);
+            setSyncStatus('synced');
+            setLastSyncTime(new Date());
+        } catch (error) {
+            console.error('Failed to sync from Microsoft:', error);
+            setSyncStatus('offline');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    // Initial sync on mount
+    useEffect(() => {
+        if (graphService) {
+            syncFromMicrosoft();
+        }
+    }, [graphService]);
 
     const handleTabChange = (tab: string) => {
         setMainSidebarTab(tab);
         onNavigate(tab as Page);
     };
 
-    const toggleTaskComplete = (taskId: string) => {
-        setTasks(tasks.map(task =>
-            task.id === taskId ? { ...task, completed: !task.completed } : task
-        ));
-    };
+    const toggleTaskComplete = async (taskId: string) => {
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) return;
 
-    const toggleTaskImportant = (taskId: string) => {
-        setTasks(tasks.map(task =>
-            task.id === taskId ? { ...task, important: !task.important } : task
-        ));
-    };
+        const newCompleted = !task.completed;
 
-    const addTask = () => {
-        if (newTaskTitle.trim()) {
-            const newTask: Task = {
-                id: Date.now().toString(),
-                title: newTaskTitle,
-                completed: false,
-                important: false,
-                myDay: selectedList === 'my-day',
-                listId: selectedList === 'my-day' || selectedList === 'important' || selectedList === 'planned'
-                    ? 'assignments'
-                    : selectedList,
-            };
-            setTasks([...tasks, newTask]);
-            setNewTaskTitle('');
-            setShowAddTask(false);
+        // Update locally first for responsiveness
+        setTasks(tasks.map((t) =>
+            t.id === taskId ? { ...t, completed: newCompleted } : t
+        ));
+
+        // Sync to Microsoft if this is a synced task
+        if (graphService && task.microsoftId && task.isSynced) {
+            try {
+                const listMsId = lists.find((l) => l.id === task.listId)?.microsoftId;
+                if (listMsId) {
+                    await graphService.updateTask(listMsId, task.microsoftId, {
+                        status: newCompleted ? 'completed' : 'notStarted',
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to sync task completion:', error);
+                // Revert on error
+                setTasks(tasks.map((t) =>
+                    t.id === taskId ? { ...t, completed: !newCompleted } : t
+                ));
+            }
         }
     };
 
-    const deleteTask = (taskId: string) => {
-        setTasks(tasks.filter(task => task.id !== taskId));
+    const toggleTaskImportant = async (taskId: string) => {
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) return;
+
+        const newImportant = !task.important;
+
+        setTasks(tasks.map((t) =>
+            t.id === taskId ? { ...t, important: newImportant } : t
+        ));
+
+        if (graphService && task.microsoftId && task.isSynced) {
+            try {
+                const listMsId = lists.find((l) => l.id === task.listId)?.microsoftId;
+                if (listMsId) {
+                    await graphService.updateTask(listMsId, task.microsoftId, {
+                        importance: newImportant ? 'high' : 'normal',
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to sync task importance:', error);
+                setTasks(tasks.map((t) =>
+                    t.id === taskId ? { ...t, important: !newImportant } : t
+                ));
+            }
+        }
+    };
+
+    const addTask = async () => {
+        if (!newTaskTitle.trim()) return;
+
+        const currentList = lists.find((l) => l.id === selectedList);
+        const isMicrosoftList = currentList?.microsoftId != null;
+
+        const newTask: Task = {
+            id: `temp-${Date.now()}`,
+            title: newTaskTitle,
+            completed: false,
+            important: false,
+            myDay: selectedList === 'my-day',
+            listId: selectedList === 'my-day' || selectedList === 'important' || selectedList === 'planned'
+                ? lists.find((l) => l.microsoftId)?.id || 'assignments'
+                : selectedList,
+            isSynced: false,
+        };
+
+        setTasks([...tasks, newTask]);
+        setNewTaskTitle('');
+        setShowAddTask(false);
+
+        // Sync to Microsoft if applicable
+        if (graphService && isMicrosoftList && currentList?.microsoftId) {
+            try {
+                const msTask = await graphService.createTask(
+                    currentList.microsoftId,
+                    transformToMicrosoftTask(newTask) as any
+                );
+
+                // Update the task with Microsoft ID
+                setTasks((prevTasks) =>
+                    prevTasks.map((t) =>
+                        t.id === newTask.id
+                            ? { ...t, id: `ms-${msTask.id}`, microsoftId: msTask.id, isSynced: true }
+                            : t
+                    )
+                );
+            } catch (error) {
+                console.error('Failed to create task in Microsoft:', error);
+            }
+        }
+    };
+
+    const deleteTask = async (taskId: string) => {
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) return;
+
+        setTasks(tasks.filter((t) => t.id !== taskId));
         if (selectedTask?.id === taskId) {
             setSelectedTask(null);
+        }
+
+        if (graphService && task.microsoftId && task.isSynced) {
+            try {
+                const listMsId = lists.find((l) => l.id === task.listId)?.microsoftId;
+                if (listMsId) {
+                    await graphService.deleteTask(listMsId, task.microsoftId);
+                }
+            } catch (error) {
+                console.error('Failed to delete task from Microsoft:', error);
+            }
         }
     };
 
@@ -197,17 +369,17 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
         let filtered = tasks;
 
         if (selectedList === 'my-day') {
-            filtered = tasks.filter(task => task.myDay && !task.completed);
+            filtered = tasks.filter((task) => task.myDay && !task.completed);
         } else if (selectedList === 'important') {
-            filtered = tasks.filter(task => task.important && !task.completed);
+            filtered = tasks.filter((task) => task.important && !task.completed);
         } else if (selectedList === 'planned') {
-            filtered = tasks.filter(task => task.dueDate && !task.completed);
+            filtered = tasks.filter((task) => task.dueDate && !task.completed);
         } else {
-            filtered = tasks.filter(task => task.listId === selectedList);
+            filtered = tasks.filter((task) => task.listId === selectedList);
         }
 
         if (searchQuery) {
-            filtered = filtered.filter(task =>
+            filtered = filtered.filter((task) =>
                 task.title.toLowerCase().includes(searchQuery.toLowerCase())
             );
         }
@@ -216,7 +388,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
     };
 
     const getCompletedTasks = () => {
-        return tasks.filter(task => {
+        return tasks.filter((task) => {
             if (selectedList === 'my-day') return task.myDay && task.completed;
             if (selectedList === 'important') return task.important && task.completed;
             if (selectedList === 'planned') return task.dueDate && task.completed;
@@ -250,6 +422,42 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                         <h2>To Do</h2>
                     </div>
 
+                    {/* Sync Status */}
+                    <div style={{
+                        padding: '12px 16px',
+                        margin: '12px 16px',
+                        background: syncStatus === 'synced' ? '#E8F5E9' : syncStatus === 'syncing' ? '#FFF9C4' : '#FFEBEE',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '12px',
+                    }}>
+                        {syncStatus === 'synced' && <Cloud size={14} />}
+                        {syncStatus === 'syncing' && <RefreshCw size={14} className="spinner" />}
+                        {syncStatus === 'offline' && <CloudOff size={14} />}
+                        <span>
+                            {syncStatus === 'synced' && `Synced ${lastSyncTime ? 'at ' + lastSyncTime.toLocaleTimeString() : ''}`}
+                            {syncStatus === 'syncing' && 'Syncing...'}
+                            {syncStatus === 'offline' && 'Offline mode'}
+                        </span>
+                        {graphService && (
+                            <button
+                                onClick={syncFromMicrosoft}
+                                disabled={isSyncing}
+                                style={{
+                                    marginLeft: 'auto',
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: isSyncing ? 'not-allowed' : 'pointer',
+                                    padding: '4px',
+                                }}
+                            >
+                                <RefreshCw size={14} className={isSyncing ? 'spinner' : ''} />
+                            </button>
+                        )}
+                    </div>
+
                     <div className="todo-search">
                         <Search size={16} />
                         <input
@@ -261,42 +469,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                     </div>
 
                     <div className="lists-section">
-                        <div
-                            className={`list-item ${selectedList === 'my-day' ? 'active' : ''}`}
-                            onClick={() => setSelectedList('my-day')}
-                        >
-                            <div className="list-icon">{renderIcon('sun', 20)}</div>
-                            <span className="list-name">My Day</span>
-                            <span className="list-count">
-                                {tasks.filter(t => t.myDay && !t.completed).length}
-                            </span>
-                        </div>
-
-                        <div
-                            className={`list-item ${selectedList === 'important' ? 'active' : ''}`}
-                            onClick={() => setSelectedList('important')}
-                        >
-                            <div className="list-icon">{renderIcon('star', 20)}</div>
-                            <span className="list-name">Important</span>
-                            <span className="list-count">
-                                {tasks.filter(t => t.important && !t.completed).length}
-                            </span>
-                        </div>
-
-                        <div
-                            className={`list-item ${selectedList === 'planned' ? 'active' : ''}`}
-                            onClick={() => setSelectedList('planned')}
-                        >
-                            <div className="list-icon">{renderIcon('calendar', 20)}</div>
-                            <span className="list-name">Planned</span>
-                            <span className="list-count">
-                                {tasks.filter(t => t.dueDate && !t.completed).length}
-                            </span>
-                        </div>
-
-                        <div className="lists-divider"></div>
-
-                        {lists.filter(l => !['my-day', 'important', 'planned'].includes(l.id)).map(list => (
+                        {lists.map((list) => (
                             <div
                                 key={list.id}
                                 className={`list-item ${selectedList === list.id ? 'active' : ''}`}
@@ -304,9 +477,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                             >
                                 <div className="list-icon">{renderIcon(list.icon, 20)}</div>
                                 <span className="list-name">{list.name}</span>
-                                <span className="list-count">
-                                    {tasks.filter(t => t.listId === list.id && !t.completed).length}
-                                </span>
+                                <span className="list-count">{list.taskCount}</span>
                             </div>
                         ))}
                     </div>
@@ -322,17 +493,17 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                     <div className="tasks-header">
                         <div className="tasks-header-left">
                             <h1 className="tasks-title">
-                                {lists.find(l => l.id === selectedList)?.name ||
-                                    (selectedList === 'my-day' ? 'My Day' :
-                                        selectedList === 'important' ? 'Important' : 'Planned')}
+                                {lists.find((l) => l.id === selectedList)?.name || 'Tasks'}
                             </h1>
-                            <span className="tasks-date">
-                                {selectedList === 'my-day' && new Date().toLocaleDateString('en-US', {
-                                    weekday: 'long',
-                                    month: 'long',
-                                    day: 'numeric'
-                                })}
-                            </span>
+                            {selectedList === 'my-day' && (
+                                <span className="tasks-date">
+                                    {new Date().toLocaleDateString('en-US', {
+                                        weekday: 'long',
+                                        month: 'long',
+                                        day: 'numeric',
+                                    })}
+                                </span>
+                            )}
                         </div>
                         <div className="tasks-header-actions">
                             <button className="header-action-btn" title="Sort">
@@ -346,7 +517,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
 
                     <div className="tasks-list">
                         {/* Active Tasks */}
-                        {activeTasks.map(task => (
+                        {activeTasks.map((task) => (
                             <div
                                 key={task.id}
                                 className={`task-item ${selectedTask?.id === task.id ? 'selected' : ''}`}
@@ -365,19 +536,14 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                                 <div className="task-content">
                                     <div className="task-title-row">
                                         <span className="task-title">{task.title}</span>
+                                        {task.isSynced && (
+                                            <Cloud size={12} style={{ color: '#6B9080', marginLeft: '8px' }} />
+                                        )}
                                     </div>
                                     {task.dueDate && (
                                         <div className="task-meta">
                                             <CalendarDays size={12} />
                                             <span>{formatDate(task.dueDate)}</span>
-                                        </div>
-                                    )}
-                                    {task.steps && task.steps.length > 0 && (
-                                        <div className="task-meta">
-                                            <ListIcon size={12} />
-                                            <span>
-                                                {task.steps.filter(s => s.completed).length} of {task.steps.length}
-                                            </span>
                                         </div>
                                     )}
                                 </div>
@@ -396,10 +562,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
 
                         {/* Add Task Button */}
                         {!showAddTask ? (
-                            <button
-                                className="add-task-btn"
-                                onClick={() => setShowAddTask(true)}
-                            >
+                            <button className="add-task-btn" onClick={() => setShowAddTask(true)}>
                                 <Plus size={18} />
                                 <span>Add a task</span>
                             </button>
@@ -427,7 +590,7 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                                     <CheckCircle2 size={16} />
                                     <span>Completed ({completedTasks.length})</span>
                                 </div>
-                                {completedTasks.map(task => (
+                                {completedTasks.map((task) => (
                                     <div
                                         key={task.id}
                                         className="task-item completed"
@@ -461,16 +624,9 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                                 className="task-checkbox-large"
                                 onClick={() => toggleTaskComplete(selectedTask.id)}
                             >
-                                {selectedTask.completed ? (
-                                    <CheckCircle2 size={24} />
-                                ) : (
-                                    <Circle size={24} />
-                                )}
+                                {selectedTask.completed ? <CheckCircle2 size={24} /> : <Circle size={24} />}
                             </button>
-                            <button
-                                className="close-detail-btn"
-                                onClick={() => setSelectedTask(null)}
-                            >
+                            <button className="close-detail-btn" onClick={() => setSelectedTask(null)}>
                                 <ChevronRight size={20} />
                             </button>
                         </div>
@@ -478,43 +634,16 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                         <div className="task-detail-content">
                             <h2 className="task-detail-title">{selectedTask.title}</h2>
 
-                            {/* Steps */}
-                            {selectedTask.steps && selectedTask.steps.length > 0 && (
-                                <div className="task-steps">
-                                    <div className="steps-header">
-                                        <ListIcon size={16} />
-                                        <span>Steps</span>
-                                    </div>
-                                    {selectedTask.steps.map(step => (
-                                        <div key={step.id} className="step-item">
-                                            <button className="step-checkbox">
-                                                {step.completed ? (
-                                                    <CheckCircle2 size={16} />
-                                                ) : (
-                                                    <Circle size={16} />
-                                                )}
-                                            </button>
-                                            <span className={step.completed ? 'completed' : ''}>
-                                                {step.title}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Add to My Day */}
                             <button className="detail-action-btn">
                                 <Sun size={18} />
                                 <span>{selectedTask.myDay ? 'Remove from My Day' : 'Add to My Day'}</span>
                             </button>
 
-                            {/* Reminder */}
                             <button className="detail-action-btn">
                                 <Bell size={18} />
                                 <span>Remind me</span>
                             </button>
 
-                            {/* Due Date */}
                             <button className="detail-action-btn">
                                 <CalendarDays size={18} />
                                 <span>
@@ -524,13 +653,11 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                                 </span>
                             </button>
 
-                            {/* Repeat */}
                             <button className="detail-action-btn">
                                 <Repeat size={18} />
                                 <span>Repeat</span>
                             </button>
 
-                            {/* Notes */}
                             <div className="task-notes-section">
                                 <MessageSquare size={16} />
                                 <textarea
@@ -542,15 +669,12 @@ const ToDo: React.FC<ToDoProps> = ({ onNavigate }) => {
                         </div>
 
                         <div className="task-detail-footer">
-                            <button
-                                className="delete-task-btn"
-                                onClick={() => deleteTask(selectedTask.id)}
-                            >
+                            <button className="delete-task-btn" onClick={() => deleteTask(selectedTask.id)}>
                                 <Trash2 size={16} />
                                 <span>Delete task</span>
                             </button>
                             <div className="task-created-date">
-                                Created on {new Date().toLocaleDateString()}
+                                {selectedTask.isSynced ? 'Synced with Microsoft To Do' : 'Local task'}
                             </div>
                         </div>
                     </aside>
