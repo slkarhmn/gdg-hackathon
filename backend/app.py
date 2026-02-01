@@ -11,6 +11,15 @@ import uuid
 import mimetypes
 
 from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+credential = DefaultAzureCredential()
+client = SecretClient(vault_url="https://graph-api7.vault.azure.net/", credential=credential)
+
+OPENAI_API_KEY = client.get_secret("OPENAI_API_KEY").value
+GRAPH_CLIENT_SECRET = client.get_secret("GRAPH_CLIENT_SECRET").value
+
 from microsoft_routes import register_microsoft_routes
 from ai_notes import (
     extract_text_from_note,
