@@ -307,7 +307,6 @@ const StudyBotPanel: React.FC<StudyBotPanelProps> = ({ assignments, onPlanGenera
   const [loading, setLoading] = useState(false);
   const [generatedPlan, setGeneratedPlan] = useState<StudyPlan | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [setExtractedInfo] = useState<string>("");
   const [showPreferences, setShowPreferences] = useState(false);
   const [generatedPlanJSON, setGeneratedPlanJSON] = useState<StudyPlanJSON | null>(null);
 
