@@ -11,16 +11,16 @@ import uuid
 import mimetypes
 
 from dotenv import load_dotenv
-from azure.identity import DefaultAzureCredential
-from azure.keyvault.secrets import SecretClient
+# from azure.identity import DefaultAzureCredential
+# from azure.keyvault.secrets import SecretClient
 
-credential = DefaultAzureCredential()
-client = SecretClient(vault_url="https://graph-api7.vault.azure.net/", credential=credential)
+# credential = DefaultAzureCredential()
+# client = SecretClient(vault_url="https://graph-api7.vault.azure.net/", credential=credential)
 
-OPENAI_API_KEY = client.get_secret("OPENAI-API-KEY").value
-MICROSOFT_CLIENT_ID = client.get_secret("MICROSOFT-CLIENT-ID").value
-MICROSOFT_CLIENT_SECRET = client.get_secret("MICROSOFT-CLIENT-SECRET").value
-MICROSOFT_TENANT_ID = client.get_secret("MICROSOFT-TENANT-ID").value
+# OPENAI_API_KEY = client.get_secret("OPENAI-API-KEY").value
+# MICROSOFT_CLIENT_ID = client.get_secret("MICROSOFT-CLIENT-ID").value
+# MICROSOFT_CLIENT_SECRET = client.get_secret("MICROSOFT-CLIENT-SECRET").value
+# MICROSOFT_TENANT_ID = client.get_secret("MICROSOFT-TENANT-ID").value
 
 from microsoft_routes import register_microsoft_routes
 from ai_notes import (
@@ -2034,7 +2034,101 @@ def export_note(note_id):
         temp = export_note_as_pdf(note, summary, questions)
         return send_file(temp.name, as_attachment=True, download_name=f"{note.subject or 'note'}.pdf")
 
+@app.route('/api/resources/generate-quiz', methods=['POST'])
+def generate_quiz():
+    """Generate quiz from selected resources using OpenAI"""
+    data = request.json
+    
+    if not data or 'resource_ids' not in data:
+        return jsonify({'error': 'resource_ids is required'}), 400
+    
+    resource_ids = data['resource_ids']
+    recipient_email = data.get('recipient_email')
+    custom_prompt = data.get('custom_prompt', '')
+    course_name = data.get('course_name', '')
+    week_number = data.get('week_number', '')
+    
+    if not recipient_email:
+        return jsonify({'error': 'recipient_email is required'}), 400
+    
+    # Get resources
+    resources = Resource.query.filter(Resource.id.in_(resource_ids)).all()
+    
+    if not resources:
+        return jsonify({'error': 'No resources found'}), 404
+    
+    try:
+        import openai
+        import os
+        
+        # Set OpenAI API key from environment
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        
+        if not openai.api_key:
+            return jsonify({'error': 'OpenAI API key not configured'}), 500
+        
+        # Build context from resources
+        resource_context = f"Course: {course_name}\nWeek: {week_number}\n\n"
+        resource_context += "Resources:\n"
+        for r in resources:
+            resource_context += f"- {r.title} ({r.file_type})\n"
+        
+        # Generate quiz using OpenAI
+        response = openai.chat.completions.create(
+            model="gpt-4",  # or "gpt-3.5-turbo" for faster/cheaper
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a university professor creating quiz questions. Generate clear, academic-level questions with multiple choice answers."
+                },
+                {
+                    "role": "user",
+                    "content": f"""{resource_context}
 
+{custom_prompt or 'Generate 10 quiz questions focusing on key concepts. Include 4 answer choices per question.'}
+
+Format each question as:
+Q[number]: [Question]
+A) [Option]
+B) [Option]
+C) [Option]
+D) [Option]
+Correct Answer: [Letter]"""
+                }
+            ],
+            max_tokens=2000,
+            temperature=0.7
+        )
+        
+        quiz_content = response.choices[0].message.content
+        
+        # For local deployment, you can either:
+        # 1. Just return the quiz (user copies it manually)
+        # 2. Send via email if you have SMTP configured
+        # 3. Save to a file
+        
+        # Option: Send email via SMTP (if configured)
+        email_sent = False
+        try:
+            from flask_mail import Mail, Message
+            # Configure Flask-Mail if needed
+            # mail = Mail(app)
+            # msg = Message(...)
+            # mail.send(msg)
+            pass
+        except:
+            pass
+        
+        return jsonify({
+            'success': True,
+            'quiz': quiz_content,
+            'message': 'Quiz generated successfully',
+            'email_sent': email_sent
+        })
+    
+    except Exception as e:
+        logger.error(f"Quiz generation error: {str(e)}")
+        return jsonify({'error': f'Failed to generate quiz: {str(e)}'}), 500
 
 # =============================================================================
 # MAIN

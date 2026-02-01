@@ -480,81 +480,55 @@ const ProfessorDashboard: React.FC<ProfessorDashboardProps> = ({ onNavigate, gra
     }
   };
 
-  const generateQuiz = async () => {
+const generateQuiz = async () => {
     if (selectedResources.size === 0 || !recipientEmail) return;
 
     setIsGenerating(true);
 
     try {
-        // Call Azure OpenAI directly
-        const azureOpenAIEndpoint = 'https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-MODEL/chat/completions?api-version=2024-02-15-preview';
-        const azureOpenAIKey = 'YOUR_AZURE_OPENAI_KEY'; // Store securely!
-
         const course = selectedCourse ? courses.find(c => c.id === selectedCourse) : null;
         
-        // Generate quiz with Azure OpenAI
-        const aiResponse = await fetch(azureOpenAIEndpoint, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-key': azureOpenAIKey,
-        },
-        body: JSON.stringify({
-            messages: [
-            {
-                role: 'system',
-                content: 'You are a university professor creating quiz questions. Generate clear, academic-level questions with multiple choice answers.'
-            },
-            {
-                role: 'user',
-                content: `Generate 10 quiz questions for Week ${selectedWeek} of ${course?.name}. 
-                
-                ${quizPrompt || 'Focus on key concepts and include 4 answer choices per question.'}
-                
-                Format each question as:
-                Q[number]: [Question]
-                A) [Option]
-                B) [Option]
-                C) [Option]
-                D) [Option]
-                Correct Answer: [Letter]`
-            }
-            ],
-            max_tokens: 2000,
-            temperature: 0.7
-        })
+        const response = await fetch('http://localhost:5000/api/resources/generate-quiz', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                resource_ids: Array.from(selectedResources),
+                recipient_email: recipientEmail,
+                custom_prompt: quizPrompt,
+                course_name: course?.name || '',
+                week_number: selectedWeek || ''
+            })
         });
 
-        const aiData = await aiResponse.json();
-        const quizContent = aiData.choices[0].message.content;
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to generate quiz');
+        }
 
-        // Send email via Power Automate
-        const flowUrl = 'YOUR_POWER_AUTOMATE_EMAIL_FLOW_URL';
+        const result = await response.json();
         
-        await fetch(flowUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            recipientEmail: recipientEmail,
-            subject: `Quiz - Week ${selectedWeek} - ${course?.name}`,
-            quizContent: quizContent,
-            courseName: course?.name,
-            weekNumber: selectedWeek
-        })
-        });
-
-        alert('Quiz generated and sent successfully!');
+        // Show the quiz in an alert or modal
+        alert(`Quiz generated successfully!\n\n${result.quiz}`);
+        
+        // Optionally: download as text file
+        const blob = new Blob([result.quiz], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Quiz-Week${selectedWeek}-${course?.name || 'Course'}.txt`;
+        a.click();
+        
         setShowAIPanel(false);
         setSelectedResources(new Set());
         setQuizPrompt('');
         setRecipientEmail('');
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to generate quiz. Please try again.');
+        alert(error instanceof Error ? error.message : 'Failed to generate quiz. Please try again.');
     } finally {
         setIsGenerating(false);
     }
-  };
+};
 
   const getSelectedLectureCount = () => selectedResources.size;
 
