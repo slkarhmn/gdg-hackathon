@@ -1,8 +1,3 @@
-"""
-Flask Routes for Microsoft Teams and To Do Integration
-Add these routes to your main app.py
-"""
-
 from flask import Flask, request, jsonify, redirect, session
 from flask_restx import Api, Resource, fields, Namespace
 import msal
@@ -10,18 +5,10 @@ from graph_api_service import GraphAPIService, TokenManager
 from microsoft_config import MicrosoftConfig
 from datetime import datetime, timedelta
 
-
-# Create namespaces for API organization
 teams_ns = Namespace('teams', description='Microsoft Teams operations')
 todo_ns = Namespace('todo', description='Microsoft To Do operations')
 auth_ns = Namespace('auth', description='Authentication operations')
 
-
-# =============================================================================
-# API MODELS FOR SWAGGER DOCUMENTATION
-# =============================================================================
-
-# Auth models
 auth_response = auth_ns.model('AuthResponse', {
     'auth_url': fields.String(description='URL to redirect user for authentication'),
 })
@@ -32,7 +19,6 @@ token_response = auth_ns.model('TokenResponse', {
     'expires_in': fields.Integer(description='Token expiration time in seconds'),
 })
 
-# Teams models
 chat_message = teams_ns.model('ChatMessage', {
     'id': fields.String(description='Message ID'),
     'content': fields.String(description='Message content'),
@@ -50,7 +36,6 @@ create_chat_input = teams_ns.model('CreateChatInput', {
     'initial_message': fields.String(description='Optional initial message'),
 })
 
-# To Do models
 todo_list_model = todo_ns.model('TodoList', {
     'id': fields.String(description='List ID'),
     'displayName': fields.String(description='List name'),
@@ -74,11 +59,6 @@ create_task_input = todo_ns.model('CreateTaskInput', {
     'importance': fields.String(description='Importance: low, normal, high'),
     'isReminderOn': fields.Boolean(description='Enable reminder'),
 })
-
-
-# =============================================================================
-# AUTHENTICATION ROUTES
-# =============================================================================
 
 @auth_ns.route('/login')
 class Login(Resource):
@@ -114,8 +94,6 @@ class AuthCallback(Resource):
         try:
             token_data = TokenManager.get_token_from_code(auth_code)
             
-            # Store token in session or database
-            # For now, returning it (in production, store securely)
             return token_data
         
         except Exception as e:
@@ -142,11 +120,6 @@ class RefreshToken(Resource):
         
         except Exception as e:
             return {'error': str(e)}, 500
-
-
-# =============================================================================
-# TEAMS ROUTES (GET HELP FEATURE)
-# =============================================================================
 
 def get_graph_service():
     """Helper to get GraphAPIService from auth token"""
@@ -281,10 +254,6 @@ class UserPresence(Resource):
             return {'error': str(e)}, 500
 
 
-# =============================================================================
-# TO DO ROUTES
-# =============================================================================
-
 @todo_ns.route('/lists')
 class TodoLists(Resource):
     @todo_ns.doc('get_todo_lists', security='Bearer')
@@ -412,11 +381,6 @@ class CompleteTask(Resource):
             return result
         except Exception as e:
             return {'error': str(e)}, 500
-
-
-# =============================================================================
-# REGISTER NAMESPACES (Add this to your main app.py)
-# =============================================================================
 
 def register_microsoft_routes(api):
     """Register all Microsoft-related routes to the API"""

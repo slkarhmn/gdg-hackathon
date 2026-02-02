@@ -9,7 +9,6 @@ from datetime import datetime
 from openai import OpenAI
 from pathlib import Path
 
-# Initialize OpenAI client
 client = None
 
 def initialize_openai():
@@ -37,10 +36,8 @@ def load_context(user_id):
             with open(context_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except json.JSONDecodeError:
-            # If file is corrupted, return empty context
             return {"user_id": user_id, "context_history": [], "created_at": datetime.utcnow().isoformat()}
     else:
-        # Create new context file
         context = {
             "user_id": user_id,
             "context_history": [],
@@ -72,7 +69,6 @@ def generate_context_summary(conversation_messages):
     if not client:
         initialize_openai()
     
-    # Create a prompt to summarize the conversation
     conversation_text = "\n".join([
         f"{msg['role'].upper()}: {msg['content']}" 
         for msg in conversation_messages
@@ -102,9 +98,7 @@ Provide only the bullet point summary, nothing else."""
         return summary
     
     except Exception as e:
-        # Fallback summary if OpenAI call fails
-        return f"• Conversation on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
-
+        return f"• Conversation on {datetime.timezone.utc.strftime('%Y-%m-%d %H:%M')}"
 
 def add_context_entry(user_id, conversation_messages):
     """
@@ -116,10 +110,8 @@ def add_context_entry(user_id, conversation_messages):
     """
     context = load_context(user_id)
     
-    # Generate summary
     summary = generate_context_summary(conversation_messages)
     
-    # Add to context history
     context_entry = {
         "timestamp": datetime.utcnow().isoformat(),
         "summary": summary
@@ -127,7 +119,6 @@ def add_context_entry(user_id, conversation_messages):
     
     context["context_history"].append(context_entry)
     
-    # Keep only the last 20 context entries to avoid file getting too large
     if len(context["context_history"]) > 20:
         context["context_history"] = context["context_history"][-20:]
     
@@ -151,7 +142,7 @@ def format_context_for_prompt(user_id):
         return ""
     
     context_text = "Previous conversation context:\n"
-    for entry in context["context_history"][-10:]:  # Only use last 10 entries
+    for entry in context["context_history"][-10:]:
         context_text += f"{entry['summary']}\n"
     
     context_text += "\n---\n\n"
@@ -175,11 +166,9 @@ def chat_with_ai(user_id, user_message, conversation_history=None, source=None, 
     if not client:
         initialize_openai()
     
-    # Initialize conversation history if not provided
     if conversation_history is None:
         conversation_history = []
     
-    # Get context from previous conversations
     context_prompt = format_context_for_prompt(user_id)
     
     source_hint = ""
@@ -190,7 +179,6 @@ def chat_with_ai(user_id, user_message, conversation_history=None, source=None, 
     if note_context and note_context.strip():
         note_hint = f"\n\n--- Current note content (the user is viewing this note; answer questions about it) ---\n{note_context[:4000]}\n--- End of note ---\n"
     
-    # Build messages for OpenAI
     messages = [
         {
             "role": "system", 
@@ -201,14 +189,11 @@ assignments, and study plans. Be concise, friendly, and educational.
         }
     ]
     
-    # Add conversation history
     messages.extend(conversation_history)
     
-    # Add new user message
     messages.append({"role": "user", "content": user_message})
     
     try:
-        # Call OpenAI API
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=messages,
@@ -218,7 +203,6 @@ assignments, and study plans. Be concise, friendly, and educational.
         
         assistant_message = response.choices[0].message.content
         
-        # Update conversation history
         conversation_history.append({"role": "user", "content": user_message})
         conversation_history.append({"role": "assistant", "content": assistant_message})
         

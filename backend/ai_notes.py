@@ -2,7 +2,7 @@
 
 import os
 import json
-from openai import OpenAI  # Updated import
+from openai import OpenAI 
 import tempfile
 from docx import Document
 from fpdf import FPDF
@@ -17,7 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Initialize OpenAI client (matching ai_chat.py pattern)
 client = None
 
 def initialize_openai():
@@ -58,7 +57,6 @@ def generate_summary_and_questions(text):
     """
     Calls OpenAI to generate summary notes and exam-style questions.
     """
-    # Initialize client if not already done
     if not client:
         initialize_openai()
     
@@ -82,7 +80,6 @@ def generate_summary_and_questions(text):
     try:
         logger.info("Calling OpenAI ChatCompletion API")
 
-        # Updated to use new API syntax
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
@@ -92,7 +89,6 @@ def generate_summary_and_questions(text):
 
         logger.info("OpenAI response received successfully")
 
-        # Updated to access response content
         result = response.choices[0].message.content
 
     except Exception as e:

@@ -1,7 +1,3 @@
-"""
-OpenAI service for StudyBot — handles chat, file parsing, and study plan generation.
-"""
-
 import os
 import json
 import re
@@ -9,10 +5,6 @@ from typing import Any, Optional
 from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# ---------------------------------------------------------------------------
-# System Prompt
-# ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are StudyBot, an AI study planner for university students.
 
@@ -49,9 +41,6 @@ You: "Perfect! Here's your personalized study plan:
 Would you like me to adjust anything?"
 """
 
-# ---------------------------------------------------------------------------
-# Chat Function
-# ---------------------------------------------------------------------------
 
 def chat(messages: list[dict[str, str]]) -> str:
     """
@@ -66,9 +55,6 @@ def chat(messages: list[dict[str, str]]) -> str:
     return response.choices[0].message.content or ""
 
 
-# ---------------------------------------------------------------------------
-# File Parsing (Vision API)
-# ---------------------------------------------------------------------------
 
 def parse_uploaded_files(file_data_list: list[dict[str, Any]]) -> str:
     """
@@ -83,7 +69,6 @@ def parse_uploaded_files(file_data_list: list[dict[str, Any]]) -> str:
     if not file_data_list:
         return ""
     
-    # Build content with multiple images
     content = [
         {
             "type": "text",
@@ -119,10 +104,6 @@ Format as a clear bullet list."""
     
     return response.choices[0].message.content or ""
 
-
-# ---------------------------------------------------------------------------
-# Plan Generation
-# ---------------------------------------------------------------------------
 
 def generate_study_plan_json(
     modules: list[dict],
@@ -207,7 +188,6 @@ Output ONLY the JSON, no explanation."""
     
     reply = response.choices[0].message.content or "{}"
     
-    # Extract JSON from code block if present
     json_match = re.search(r'```json\s*(.*?)\s*```', reply, re.DOTALL)
     if json_match:
         reply = json_match.group(1)
@@ -215,7 +195,6 @@ Output ONLY the JSON, no explanation."""
     try:
         return json.loads(reply)
     except json.JSONDecodeError:
-        # Fallback: return minimal structure
         return {
             "metadata": {"timezone": timezone, "generatedAt": "", "weekStart": ""},
             "inputs": {"modules": modules, "deadlines": deadlines, "preferences": preferences},
@@ -223,10 +202,6 @@ Output ONLY the JSON, no explanation."""
             "summary": {"totalStudyMinutes": 0, "totalBreakMinutes": 0}
         }
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def build_context_message(assignments: list[dict], existing_plan: Optional[dict] = None) -> str:
     """Build a context message from assignments to inject into conversation."""
@@ -248,7 +223,6 @@ def extract_json_plan(assistant_reply: str) -> Optional[dict]:
     Extract JSON study plan from assistant's message if present.
     Returns None if no valid JSON found.
     """
-    # Look for ```json ... ``` blocks
     json_match = re.search(r'```json\s*(.*?)\s*```', assistant_reply, re.DOTALL)
     
     if json_match:
@@ -257,7 +231,6 @@ def extract_json_plan(assistant_reply: str) -> Optional[dict]:
         except json.JSONDecodeError:
             pass
     
-    # Try parsing the whole reply as JSON (fallback)
     try:
         return json.loads(assistant_reply)
     except json.JSONDecodeError:

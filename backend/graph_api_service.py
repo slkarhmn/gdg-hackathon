@@ -38,7 +38,6 @@ class GraphAPIService:
             
             response.raise_for_status()
             
-            # Handle empty responses (like DELETE)
             if response.status_code == 204:
                 return {'success': True}
             
@@ -50,10 +49,6 @@ class GraphAPIService:
                 print(f"Response: {e.response.text}")
             raise
     
-    # =============================================================================
-    # USER METHODS
-    # =============================================================================
-    
     def get_user_profile(self) -> Dict:
         """Get current user's profile"""
         return self._make_request('GET', 'me')
@@ -61,10 +56,6 @@ class GraphAPIService:
     def get_user_presence(self, user_id: str) -> Dict:
         """Get user's presence status (online/offline/busy)"""
         return self._make_request('GET', f'users/{user_id}/presence')
-    
-    # =============================================================================
-    # TEAMS CHAT METHODS (for Get Help feature)
-    # =============================================================================
     
     def get_chats(self) -> List[Dict]:
         """Get all chats for the current user"""
@@ -103,7 +94,6 @@ class GraphAPIService:
         
         chat = self._make_request('POST', 'chats', data)
         
-        # Send initial message if provided
         if message and 'id' in chat:
             self.send_chat_message(chat['id'], message)
         
@@ -124,10 +114,6 @@ class GraphAPIService:
         endpoint = f"users?$filter=startswith(displayName,'{search_query}') or startswith(mail,'{search_query}')&$top=10"
         result = self._make_request('GET', endpoint)
         return result.get('value', [])
-    
-    # =============================================================================
-    # TO DO METHODS
-    # =============================================================================
     
     def get_todo_lists(self) -> List[Dict]:
         """Get all To Do task lists"""

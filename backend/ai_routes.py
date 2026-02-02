@@ -13,14 +13,8 @@ from flask import request
 import os
 import openai_service as ai
 
-# ---------------------------------------------------------------------------
-# Namespace
-# ---------------------------------------------------------------------------
 ns_ai = Namespace('ai', description='AI Study-Plan Chatbot (StudyBot)')
 
-# ---------------------------------------------------------------------------
-# Swagger models
-# ---------------------------------------------------------------------------
 chat_input = ns_ai.model('AIChatInput', {
     'user_id':     fields.Integer(required=True,  description='User ID'),
     'message':     fields.String(required=True,   description='User message'),
@@ -60,9 +54,6 @@ generate_plan_input = ns_ai.model('GeneratePlanInput', {
     'timezone': fields.String(description='IANA timezone (default: Asia/Dubai)')
 })
 
-# ---------------------------------------------------------------------------
-# In-memory conversation store  →  { user_id: [messages…] }
-# ---------------------------------------------------------------------------
 _conversations: dict[int, list[dict[str, str]]] = {}
 
 
@@ -73,10 +64,6 @@ def _get_or_create_session(user_id: int) -> list[dict[str, str]]:
         ]
     return _conversations[user_id]
 
-
-# ---------------------------------------------------------------------------
-# Resources
-# ---------------------------------------------------------------------------
 
 @ns_ai.route('/chat')
 class AIChatResource(Resource):
@@ -95,7 +82,6 @@ class AIChatResource(Resource):
 
         session = _get_or_create_session(user_id)
 
-        # Inject assignment context once — on the very first user turn
         if len(session) == 1 and assignments:
             context = ai.build_context_message(assignments, existing_plan=None)
             session.append({
@@ -108,7 +94,7 @@ class AIChatResource(Resource):
         try:
             reply = ai.chat(session)
         except Exception as exc:
-            session.pop()          # keep session clean on failure
+            session.pop() 
             ns_ai.abort(500, str(exc))
 
         session.append({"role": "assistant", "content": reply})

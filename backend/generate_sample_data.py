@@ -1,28 +1,8 @@
-"""
-Sample Data Generator for Study App (Updated with Tags)
-
-Generates realistic test data for development and testing.
-
-Compatible with the API including the Tags system:
-
-✔ Users
-✔ Assignments (creates tags automatically)
-✔ Tags (synced from assignments)
-✔ Notes (uses valid tags from assignments)
-
-IMPORTANT: Assignments must be created FIRST because notes can only
-use tags that have been registered from assignments.
-"""
-
 import requests
 from datetime import datetime, timedelta
 import random
 
 BASE_URL = "http://localhost:5000/api"
-
-# =============================================================================
-# SAMPLE DATA
-# =============================================================================
 
 SUBJECTS = [
     "Object Oriented Programming",
@@ -54,11 +34,6 @@ NOTE_TEMPLATES = [
     "Core principles: {concepts}",
 ]
 
-
-# =============================================================================
-# USER GENERATION
-# =============================================================================
-
 def create_sample_users(count=3):
     """Create sample users"""
     users = []
@@ -84,11 +59,6 @@ def create_sample_users(count=3):
 
     return users
 
-
-# =============================================================================
-# ASSIGNMENT GENERATION (CREATES TAGS AUTOMATICALLY)
-# =============================================================================
-
 def create_sample_assignments(user_id, count=8):
     """
     Create assignments using the API.
@@ -107,7 +77,7 @@ def create_sample_assignments(user_id, count=8):
     assignments = []
 
     assignment_templates = [
-        ("Final Exam", 45, 40, True),      # (name, days_ahead, weight, has_grade)
+        ("Final Exam", 45, 40, True),      
         ("Midterm Project", 30, 25, True),
         ("Lab Assignment 1", 14, 10, True),
         ("Lab Assignment 2", 21, 10, False),
@@ -123,7 +93,6 @@ def create_sample_assignments(user_id, count=8):
         subject = SUBJECTS[i % len(SUBJECTS)]
         subject_tags = TAGS[subject]
 
-        # Select tags for this assignment
         selected_tags = random.sample(subject_tags, min(3, len(subject_tags)))
 
         assignment_data = {
@@ -133,7 +102,7 @@ def create_sample_assignments(user_id, count=8):
             "weight": weight,
         }
         
-        # Only add grade if assignment is "graded"
+
         if has_grade:
             assignment_data["grade"] = random.randint(70, 100)
 
@@ -153,10 +122,6 @@ def create_sample_assignments(user_id, count=8):
 
     return assignments
 
-
-# =============================================================================
-# TAG OPERATIONS
-# =============================================================================
 
 def get_available_tags(user_id):
     """Get all available tags for a user (created from assignments)"""
@@ -204,10 +169,6 @@ def show_available_tags(user_id):
         return []
 
 
-# =============================================================================
-# NOTE GENERATION (USES VALID TAGS FROM ASSIGNMENTS)
-# =============================================================================
-
 def create_sample_notes(user_id, count=10):
     """
     Create sample notes for a user.
@@ -217,7 +178,6 @@ def create_sample_notes(user_id, count=10):
     using only those valid tags.
     """
     
-    # Get available tags for this user
     available_tags = get_available_tags(user_id)
     
     if not available_tags:
@@ -231,18 +191,14 @@ def create_sample_notes(user_id, count=10):
     for i in range(count):
         subject = random.choice(SUBJECTS)
         
-        # Select only from available tags (that exist from assignments)
-        # Try to pick tags that might relate to the subject
         subject_related_tags = [t for t in available_tags if any(
             t.lower() in tag.lower() or tag.lower() in t.lower() 
             for tag in TAGS.get(subject, [])
         )]
         
-        # If no related tags found, use random available tags
         if not subject_related_tags:
             subject_related_tags = available_tags
         
-        # Select 1-3 tags from available tags
         num_tags = min(random.randint(1, 3), len(subject_related_tags))
         selected_tags = random.sample(subject_related_tags, num_tags)
         
@@ -273,10 +229,6 @@ def create_sample_notes(user_id, count=10):
     return notes
 
 
-# =============================================================================
-# WEIGHTED GRADE CHECK
-# =============================================================================
-
 def check_weighted_grade(user_id):
     """Call the weighted grade endpoint"""
 
@@ -287,16 +239,12 @@ def check_weighted_grade(user_id):
     if response.status_code == 200:
         result = response.json()
         if result['weighted_grade'] is not None:
-            print(f"  📊 Weighted Grade: {result['weighted_grade']}%")
+            print(f"Weighted Grade: {result['weighted_grade']}%")
         else:
-            print(f"  📊 Weighted Grade: No graded assignments yet")
+            print(f"Weighted Grade: No graded assignments yet")
     else:
         print(f"  ✗ Failed weighted grade check: {response.text}")
 
-
-# =============================================================================
-# MAIN GENERATION
-# =============================================================================
 
 def generate_all_sample_data():
     """
@@ -316,62 +264,49 @@ def generate_all_sample_data():
     users = create_sample_users(count=3)
 
     if not users:
-        print("❌ No users created. Make sure Flask is running.")
+        print("No users created. Make sure Flask is running.")
         return
 
     for user in users:
-        print(f"\n👤 Setting up data for {user['display_name']}...")
+        print(f"\n Setting up data for {user['display_name']}...")
 
-        # STEP 1: Create assignments FIRST (this registers tags)
-        print("  📋 Creating assignments (this registers tags)...")
+        print("Creating assignments (this registers tags)...")
         create_sample_assignments(user["id"], count=8)
 
-        # STEP 2: Show available tags
-        print("\n  🏷️  Checking available tags...")
+        print("Checking available tags...")
         show_available_tags(user["id"])
 
-        # STEP 3: Create notes using valid tags
-        print("\n  📚 Creating notes (using valid tags)...")
+        print("Creating notes (using valid tags)...")
         create_sample_notes(user["id"], count=10)
 
-        # STEP 4: Check weighted grade
-        print("\n  📊 Checking weighted grade...")
+        print("Checking weighted grade...")
         check_weighted_grade(user["id"])
 
     print("\n" + "=" * 60)
-    print("✅ Sample data generation complete!")
+    print("Sample data generation complete!")
     print("=" * 60)
 
 
 def generate_for_existing_user(user_id):
     """Generate sample data for an existing user"""
     
-    print(f"\n👤 Generating data for user ID: {user_id}")
+    print(f"Generating data for user ID: {user_id}")
     
-    # Sync any existing tags first
-    print("  🔄 Syncing existing tags...")
+    print("Syncing existing tags...")
     sync_tags_from_assignments(user_id)
     
-    # Create new assignments
     print("\n  📋 Creating assignments...")
     create_sample_assignments(user_id, count=5)
     
-    # Show tags
     print("\n  🏷️  Available tags:")
     show_available_tags(user_id)
     
-    # Create notes
     print("\n  📚 Creating notes...")
     create_sample_notes(user_id, count=8)
-    
-    # Check grade
+
     print("\n  📊 Weighted grade:")
     check_weighted_grade(user_id)
 
-
-# =============================================================================
-# RUN SCRIPT
-# =============================================================================
 
 if __name__ == "__main__":
     import sys
@@ -380,7 +315,6 @@ if __name__ == "__main__":
         response = requests.get(f"{BASE_URL}/health")
 
         if response.status_code == 200:
-            # Check if user ID was passed as argument
             if len(sys.argv) > 1:
                 try:
                     user_id = int(sys.argv[1])
@@ -390,8 +324,8 @@ if __name__ == "__main__":
             else:
                 generate_all_sample_data()
         else:
-            print("❌ API is not responding correctly.")
+            print("API is not responding correctly.")
     except requests.exceptions.ConnectionError:
-        print("❌ Cannot connect to API.")
+        print("Cannot connect to API.")
         print("Start your Flask server first:")
         print("   python app.py")

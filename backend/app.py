@@ -38,24 +38,21 @@ from ai_chat import (
     get_context_stats
 )
 
-# Load environment variables once
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | app | %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI on startup
 try:
     initialize_openai()
 except Exception as e:
     print(f"Warning: Could not initialize OpenAI: {e}")
 
 app = Flask(__name__)
-# CORS(app)
+
 
 CORS(app, resources={
     r"/api/*": {
@@ -65,21 +62,18 @@ CORS(app, resources={
         "supports_credentials": True
     }
 })
-# Database configuration
+
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'study_app.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JSON_SORT_KEYS'] = False
 app.config['RESTX_MASK_SWAGGER'] = False
 
-# File upload configuration
-# Use the resources folder at the project root (one level up from backend)
 RESOURCES_FOLDER = os.path.join(os.path.dirname(basedir), 'resources')
 os.makedirs(RESOURCES_FOLDER, exist_ok=True)
 app.config['RESOURCES_FOLDER'] = RESOURCES_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024 
 
-# Allowed file extensions and their types
 ALLOWED_EXTENSIONS = {
     'pdf': 'pdf',
     'doc': 'document', 'docx': 'document', 'txt': 'document', 'rtf': 'document', 'odt': 'document',
@@ -101,21 +95,16 @@ def get_file_type(filename):
         return ALLOWED_EXTENSIONS.get(ext, 'other')
     return 'other'
 
-# Initialize API with Swagger
 api = Api(
     app,
     version='1.0',
     title='Study App API',
     description='REST API for managing study notes, plans, spaced repetition, and assignments',
-    doc='/api/docs'  # Swagger UI will be at /api/docs
+    doc='/api/docs' 
 )
 
 db = SQLAlchemy(app)
 register_microsoft_routes(api)
-
-# =============================================================================
-# MODELS
-# =============================================================================
 
 class User(db.Model):
     """User table storing Microsoft authentication data"""
@@ -257,7 +246,6 @@ class Tag(db.Model):
     source_assignment_id = db.Column(db.Integer, db.ForeignKey('assignments.id'), nullable=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Unique constraint: each user can only have one tag with a given name
     __table_args__ = (
         db.UniqueConstraint('user_id', 'name', name='unique_user_tag'),
     )
@@ -282,8 +270,8 @@ class Course(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     
     name = db.Column(db.String(255), nullable=False)
-    code = db.Column(db.String(50), nullable=False)  # e.g., "CS 401"
-    semester = db.Column(db.String(100), nullable=True)  # e.g., "Spring 2026"
+    code = db.Column(db.String(50), nullable=False)
+    semester = db.Column(db.String(100), nullable=True) 
     description = db.Column(db.Text, nullable=True)
     student_count = db.Column(db.Integer, default=0)
     total_weeks = db.Column(db.Integer, default=12)
@@ -317,19 +305,16 @@ class Resource(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     
-    # File information
     filename = db.Column(db.String(255), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
     file_path = db.Column(db.String(512), nullable=False)
     file_size = db.Column(db.Integer, nullable=False)  # Size in bytes
     mime_type = db.Column(db.String(100), nullable=False)
     file_type = db.Column(db.String(50), nullable=False)  # 'pdf', 'video', 'audio', 'document', 'image', 'other'
-    
-    # Course organization - now references the courses table
+
     course_id = db.Column(db.Integer, db.ForeignKey('courses.id'), nullable=True, index=True)
     week_number = db.Column(db.Integer, nullable=True)
     
-    # Metadata
     title = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=True)
     
@@ -369,11 +354,6 @@ class Resource(db.Model):
         return f"{size:.1f} TB"
 
 
-# =============================================================================
-# API MODELS (for Swagger documentation)
-# =============================================================================
-
-# Namespaces
 ns_users = Namespace('users', description='User operations')
 ns_notes = Namespace('notes', description='Note operations')
 ns_study_plans = Namespace('study-plans', description='Study plan operations')
@@ -384,8 +364,6 @@ ns_resources = Namespace('resources', description='Resource/lecture material ope
 ns_courses = Namespace('courses', description='Course operations')
 ns_chat = Namespace('chat', description='AI Chat operations with context management')
 
-# AI namespace — imported from ai_routes.py
-from ai_routes import ns_ai
 
 api.add_namespace(ns_users, path='/api/users')
 api.add_namespace(ns_notes, path='/api/notes')
@@ -398,7 +376,6 @@ api.add_namespace(ns_courses, path='/api/courses')
 api.add_namespace(ns_chat, path='/api/chat')
 
 
-# User models
 user_input = api.model('UserInput', {
     'microsoft_id': fields.String(required=True, description='Microsoft account ID'),
     'email': fields.String(required=True, description='User email address'),
@@ -414,7 +391,6 @@ user_output = api.model('User', {
     'last_login': fields.String(description='Last login timestamp')
 })
 
-# Note models
 note_input = api.model('NoteInput', {
     'content': fields.Raw(required=True, description='Note content (JSON object)'),
     'subject': fields.String(description='Note subject'),
@@ -431,7 +407,6 @@ note_output = api.model('Note', {
     'updated_at': fields.String(description='Update timestamp')
 })
 
-# Study plan models
 study_plan_input = api.model('StudyPlanInput', {
     'study_plan': fields.Raw(required=True, description='Monthly study plan (JSON object)')
 })
@@ -448,7 +423,6 @@ generate_plan_input = api.model('GeneratePlanInput', {
     'start_date': fields.String(required=True, description='Start date (YYYY-MM-DD)', example='2026-02-01')
 })
 
-# Assignment models
 assignment_input = api.model('AssignmentInput', {
     'name': fields.String(required=True, description='Assignment name'),
     'due_date': fields.String(required=True, description='Due date (ISO format)'),
@@ -470,7 +444,6 @@ assignment_output = api.model('Assignment', {
 })
 
 
-# Spaced repetition models
 spaced_rep_input = api.model('SpacedRepInput', {
     'note_id': fields.Integer(required=True, description='Note ID to add to spaced repetition')
 })
@@ -485,7 +458,6 @@ spaced_rep_output = api.model('SpacedRepetition', {
     'created_at': fields.String(description='Creation timestamp')
 })
 
-# Tag models
 tag_input = api.model('TagInput', {
     'name': fields.String(required=True, description='Tag name'),
     'source_assignment_id': fields.Integer(description='Assignment ID that created this tag')
@@ -499,7 +471,6 @@ tag_output = api.model('Tag', {
     'created_at': fields.String(description='Creation timestamp')
 })
 
-# Resource models
 resource_output = api.model('Resource', {
     'id': fields.Integer(description='Resource ID'),
     'user_id': fields.Integer(description='User ID'),
@@ -527,7 +498,7 @@ resource_update_input = api.model('ResourceUpdateInput', {
     'week_number': fields.Integer(description='Week number')
 })
 
-# Course models
+
 course_input = api.model('CourseInput', {
     'name': fields.String(required=True, description='Course name'),
     'code': fields.String(required=True, description='Course code (e.g., CS 401)'),
@@ -551,7 +522,6 @@ course_output = api.model('Course', {
     'updated_at': fields.String(description='Update timestamp')
 })
 
-# Chat models
 chat_message_input = api.model('ChatMessageInput', {
     'message': fields.String(required=True, description='User message to send to AI'),
     'conversation_history': fields.Raw(description='Optional conversation history from current session'),
@@ -586,10 +556,6 @@ context_stats_output = api.model('ContextStats', {
     'newest_entry': fields.String(description='Timestamp of newest entry')
 })
 
-
-# =============================================================================
-# API ENDPOINTS - USERS
-# =============================================================================
 
 @ns_users.route('')
 class UserList(RestxResource):
@@ -682,7 +648,6 @@ class UserNoteList(RestxResource):
         if not data or 'content' not in data:
             api.abort(400, 'content is required')
         
-        # Validate tags - only allow tags that exist from assignments
         requested_tags = data.get('tags', [])
         if requested_tags:
             valid_tags, invalid_tags = validate_note_tags(user_id, requested_tags)
@@ -705,10 +670,6 @@ class UserNoteList(RestxResource):
         
         return note.to_dict(), 201
 
-
-# =============================================================================
-# API ENDPOINTS - NOTES
-# =============================================================================
 
 @ns_notes.route('/<int:note_id>')
 @ns_notes.param('note_id', 'The note identifier')
@@ -733,7 +694,6 @@ class NoteResource(RestxResource):
         if 'subject' in data:
             note.subject = data['subject']
         if 'tags' in data:
-            # Validate tags - only allow tags that exist from assignments
             requested_tags = data['tags']
             if requested_tags:
                 valid_tags, invalid_tags = validate_note_tags(note.user_id, requested_tags)
@@ -759,10 +719,6 @@ class NoteResource(RestxResource):
         
         return {'message': 'Note deleted successfully'}, 200
 
-
-# =============================================================================
-# API ENDPOINTS - STUDY PLANS
-# =============================================================================
 
 @ns_study_plans.route('/user/<int:user_id>')
 @ns_study_plans.param('user_id', 'The user identifier')
@@ -847,10 +803,6 @@ class GenerateStudyPlan(RestxResource):
         db.session.commit()
         return existing_plan.to_dict()
 
-
-# =============================================================================
-# API ENDPOINTS - SPACED REPETITION
-# =============================================================================
 
 @ns_spaced_reps.route('/user/<int:user_id>')
 @ns_spaced_reps.param('user_id', 'The user identifier')
@@ -1014,11 +966,6 @@ class ReviewSpacedRep(RestxResource):
         
         return spaced_rep.to_dict()
 
-
-# =============================================================================
-# API ENDPOINTS - ASSIGNMENTS
-# =============================================================================
-
 @ns_assignments.route('/user/<int:user_id>')
 @ns_assignments.param('user_id', 'The user identifier')
 class AssignmentList(RestxResource):
@@ -1065,9 +1012,8 @@ class AssignmentList(RestxResource):
         )
 
         db.session.add(assignment)
-        db.session.flush()  # Get the assignment ID before committing
+        db.session.flush()
 
-        # Sync tags from this assignment
         sync_tags_from_assignment(user_id, assignment.id, tag_list)
 
         db.session.commit()
@@ -1094,7 +1040,6 @@ class AssignmentResource(RestxResource):
         if 'tags' in data:
             tag_list = data['tags']
             assignment.tags = json.dumps(tag_list)
-            # Sync any new tags from this assignment
             sync_tags_from_assignment(assignment.user_id, assignment.id, tag_list)
         if 'grade' in data:
             assignment.grade = data['grade']
@@ -1151,10 +1096,6 @@ class WeightedGrade(RestxResource):
         }, 200
 
 
-# =============================================================================
-# API ENDPOINTS - TAGS
-# =============================================================================
-
 @ns_tags.route('/user/<int:user_id>')
 @ns_tags.param('user_id', 'The user identifier')
 class TagList(RestxResource):
@@ -1185,7 +1126,6 @@ class TagList(RestxResource):
         if not tag_name:
             api.abort(400, 'Tag name cannot be empty')
         
-        # Check if tag already exists
         existing_tag = Tag.query.filter_by(user_id=user_id, name=tag_name).first()
         if existing_tag:
             api.abort(409, f'Tag "{tag_name}" already exists')
@@ -1253,7 +1193,6 @@ class SyncTags(RestxResource):
         """
         User.query.get_or_404(user_id)
         
-        # Get all assignments for this user
         assignments = Assignment.query.filter_by(user_id=user_id).all()
         
         created_tags = []
@@ -1263,8 +1202,7 @@ class SyncTags(RestxResource):
             created_tags.extend(new_tags)
         
         db.session.commit()
-        
-        # Get all tags after sync
+
         all_tags = Tag.query.filter_by(user_id=user_id).order_by(Tag.name).all()
         
         return {
@@ -1274,10 +1212,6 @@ class SyncTags(RestxResource):
             'all_tags': [tag.name for tag in all_tags]
         }
 
-
-# =============================================================================
-# API ENDPOINTS - COURSES
-# =============================================================================
 
 @ns_courses.route('/user/<int:user_id>')
 @ns_courses.param('user_id', 'The user identifier')
@@ -1358,8 +1292,7 @@ class CourseItem(RestxResource):
     def delete(self, course_id):
         """Delete a course and all its resources"""
         course = Course.query.get_or_404(course_id)
-        
-        # Delete all resource files associated with this course
+
         for resource in course.resources:
             if os.path.exists(resource.file_path):
                 try:
@@ -1393,10 +1326,6 @@ class CourseResources(RestxResource):
         return [r.to_dict() for r in resources]
 
 
-# =============================================================================
-# API ENDPOINTS - RESOURCES
-# =============================================================================
-
 @ns_resources.route('/user/<int:user_id>/upload')
 @ns_resources.param('user_id', 'The user identifier')
 class ResourceUpload(RestxResource):
@@ -1417,17 +1346,14 @@ class ResourceUpload(RestxResource):
         if not allowed_file(file.filename):
             api.abort(400, f'File type not allowed. Allowed types: {", ".join(ALLOWED_EXTENSIONS.keys())}')
         
-        # Get metadata from form data
         title = request.form.get('title', file.filename)
         description = request.form.get('description', '')
         course_id = request.form.get('course_id')
         week_number = request.form.get('week_number')
         
-        # Parse course_id as integer
         if course_id:
             try:
                 course_id = int(course_id)
-                # Verify course exists
                 Course.query.get_or_404(course_id)
             except ValueError:
                 course_id = None
@@ -1438,25 +1364,20 @@ class ResourceUpload(RestxResource):
             except ValueError:
                 week_number = None
         
-        # Generate unique filename
         original_filename = secure_filename(file.filename)
         file_extension = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
         unique_filename = f"{uuid.uuid4().hex}.{file_extension}" if file_extension else uuid.uuid4().hex
         
-        # Create user directory if it doesn't exist
         user_folder = os.path.join(app.config['RESOURCES_FOLDER'], str(user_id))
         os.makedirs(user_folder, exist_ok=True)
         
-        # Save the file
         file_path = os.path.join(user_folder, unique_filename)
         file.save(file_path)
         
-        # Get file size and mime type
         file_size = os.path.getsize(file_path)
         mime_type = mimetypes.guess_type(original_filename)[0] or 'application/octet-stream'
         file_type = get_file_type(original_filename)
         
-        # Create resource record
         resource = Resource(
             user_id=user_id,
             filename=unique_filename,
@@ -1546,12 +1467,10 @@ class ResourceItem(RestxResource):
         """Delete a resource and its file"""
         resource = Resource.query.get_or_404(resource_id)
         
-        # Delete the file from disk
         if os.path.exists(resource.file_path):
             try:
                 os.remove(resource.file_path)
             except OSError as e:
-                # Log error but continue with database deletion
                 print(f"Error deleting file {resource.file_path}: {e}")
         
         db.session.delete(resource)
@@ -1571,7 +1490,6 @@ class ResourceFile(RestxResource):
         if not os.path.exists(resource.file_path):
             api.abort(404, 'File not found on disk')
         
-        # Determine if we should send as attachment or inline
         download = request.args.get('download', 'false').lower() == 'true'
         
         return send_file(
@@ -1608,7 +1526,6 @@ class ResourceCourses(RestxResource):
                 if r.week_number:
                     courses[r.course_id]['weeks'].add(r.week_number)
         
-        # Convert sets to lists for JSON serialization
         result = []
         for course in courses.values():
             course['weeks'] = sorted(list(course['weeks']))
@@ -1636,7 +1553,6 @@ class ResourceBatchDelete(RestxResource):
         for resource_id in resource_ids:
             resource = Resource.query.filter_by(id=resource_id, user_id=user_id).first()
             if resource:
-                # Delete file
                 if os.path.exists(resource.file_path):
                     try:
                         os.remove(resource.file_path)
@@ -1655,10 +1571,6 @@ class ResourceBatchDelete(RestxResource):
         }
 
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
 def sync_tags_from_assignment(user_id, assignment_id, tag_names):
     """
     Create tags from an assignment's tag list.
@@ -1670,7 +1582,6 @@ def sync_tags_from_assignment(user_id, assignment_id, tag_names):
         if not tag_name:
             continue
         
-        # Check if tag already exists for this user
         existing_tag = Tag.query.filter_by(user_id=user_id, name=tag_name).first()
         if not existing_tag:
             new_tag = Tag(
@@ -1786,11 +1697,6 @@ def generate_monthly_plan_logic(start_date, notes, assignments):
     
     return monthly_plan
 
-# =============================================================================
-# API ENDPOINTS - AI CHAT (CORRECTED VERSION)
-# =============================================================================
-# Replace the chat endpoints section in app.py with this corrected version
-
 @ns_chat.route('/user/<int:user_id>/message')
 @ns_chat.param('user_id', 'The user identifier')
 @ns_chat.response(404, 'User not found')
@@ -1801,13 +1707,11 @@ class ChatMessage(RestxResource):
     @ns_chat.marshal_with(chat_response_output)
     def post(self, user_id):
         """Send a message to the AI assistant"""
-        # Import here to avoid circular imports
         try:
             from ai_chat import chat_with_ai
         except ImportError:
             api.abort(500, 'AI chat module not properly configured. Ensure ai_chat.py is in the project directory.')
         
-        # Verify user exists
         user = User.query.get(user_id)
         if not user:
             api.abort(404, f'User {user_id} not found')
@@ -1951,35 +1855,12 @@ class ChatContextStats(RestxResource):
         except Exception as e:
             api.abort(500, f'Error getting context stats: {str(e)}')
 
-# =============================================================================
-# HEALTH CHECK
-# =============================================================================
-
 @api.route('/api/health')
 class HealthCheck(RestxResource):
     def get(self):
         """Health check endpoint"""
         return {'status': 'healthy', 'timestamp': datetime.utcnow().isoformat()}, 200
 
-# =============================================================================
-# API ENDPOINTS - AI NOTES GENERATION
-# =============================================================================
-
-# @app.route('/api/users/<int:user_id>/generate-ai-note', methods=['POST'])
-# def generate_ai_note(user_id):
-#     data = request.get_json()
-#     note_id = data.get("note_id")
-#     note = Note.query.get_or_404(note_id)
-#     lecture_text = extract_text_from_note(note)
-#     summary, questions = generate_summary_and_questions(lecture_text)
-#     return jsonify({
-#         "summary": summary,
-#         "questions": questions,
-#         "note_id": note_id,
-#         "subject": note.subject,
-#         "tags": json.loads(note.tags) if note.tags else []
-#         #TODO  Ask chatgpt to add logging to see which part is failing exactly
-#     })
 @app.route('/api/users/<int:user_id>/generate-ai-note', methods=['POST'])
 def generate_ai_note(user_id):
     logger.info(f"AI note generation requested for user_id={user_id}")
@@ -2051,7 +1932,6 @@ def generate_quiz():
     if not recipient_email:
         return jsonify({'error': 'recipient_email is required'}), 400
     
-    # Get resources
     resources = Resource.query.filter(Resource.id.in_(resource_ids)).all()
     
     if not resources:
@@ -2061,21 +1941,18 @@ def generate_quiz():
         import openai
         import os
         
-        # Set OpenAI API key from environment
         openai.api_key = os.getenv("OPENAI_API_KEY")
         
         if not openai.api_key:
             return jsonify({'error': 'OpenAI API key not configured'}), 500
         
-        # Build context from resources
         resource_context = f"Course: {course_name}\nWeek: {week_number}\n\n"
         resource_context += "Resources:\n"
         for r in resources:
             resource_context += f"- {r.title} ({r.file_type})\n"
         
-        # Generate quiz using OpenAI
         response = openai.chat.completions.create(
-            model="gpt-4",  # or "gpt-3.5-turbo" for faster/cheaper
+            model="gpt-4",
             messages=[
                 {
                     "role": "system",
@@ -2102,37 +1979,15 @@ Correct Answer: [Letter]"""
         
         quiz_content = response.choices[0].message.content
         
-        # For local deployment, you can either:
-        # 1. Just return the quiz (user copies it manually)
-        # 2. Send via email if you have SMTP configured
-        # 3. Save to a file
-        
-        # Option: Send email via SMTP (if configured)
-        email_sent = False
-        try:
-            from flask_mail import Mail, Message
-            # Configure Flask-Mail if needed
-            # mail = Mail(app)
-            # msg = Message(...)
-            # mail.send(msg)
-            pass
-        except:
-            pass
-        
         return jsonify({
             'success': True,
             'quiz': quiz_content,
-            'message': 'Quiz generated successfully',
-            'email_sent': email_sent
+            'message': 'Quiz generated successfully'
         })
     
     except Exception as e:
         logger.error(f"Quiz generation error: {str(e)}")
         return jsonify({'error': f'Failed to generate quiz: {str(e)}'}), 500
-
-# =============================================================================
-# MAIN
-# =============================================================================
 
 if __name__ == '__main__':
     with app.app_context():

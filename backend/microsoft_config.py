@@ -8,26 +8,21 @@ from typing import Dict, Any
 
 class MicrosoftConfig:
     """Configuration for Microsoft Graph API"""
-    
-    # Azure AD App Registration Details
+
     CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', 'YOUR_CLIENT_ID_HERE')
     CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', 'YOUR_CLIENT_SECRET_HERE')
     TENANT_ID = os.getenv('MICROSOFT_TENANT_ID', 'YOUR_TENANT_ID_HERE')
     
-    # Redirect URI (must match Azure AD app registration)
     REDIRECT_URI = os.getenv('REDIRECT_URI', 'http://localhost:5173/auth/callback')
     
-    # Microsoft Graph API Endpoints
     AUTHORITY = f'https://login.microsoftonline.com/{TENANT_ID}'
     GRAPH_API_ENDPOINT = 'https://graph.microsoft.com/v1.0'
     
-    # ✅ UPDATED: Required Scopes - Now matches frontend authConfig.ts exactly
-    # These scopes MUST match what's in authConfig.ts for consistency
     SCOPES = [
         'User.Read',              # Basic user profile
         'User.ReadBasic.All',     # Read other users' basic profiles
-        'Chat.ReadWrite',         # ⭐ CRITICAL: Read and write chat messages (for Teams Get Help)
-        'ChatMessage.Send',       # ⭐ CRITICAL: Send chat messages (for Teams Get Help)
+        'Chat.ReadWrite',         # Read and write chat messages (for Teams Get Help)
+        'ChatMessage.Send',       # Send chat messages (for Teams Get Help)
         'Presence.Read',          # Read user presence (online/offline status)
         'Team.ReadBasic.All',     # Read basic team info
         'Channel.ReadBasic.All',  # Read basic channel info
