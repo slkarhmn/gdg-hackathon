@@ -100,3 +100,4 @@ dist-ssr
 
 log.txt
 save_pid.txt
+*.zip
